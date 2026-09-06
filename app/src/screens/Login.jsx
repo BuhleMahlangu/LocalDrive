@@ -64,7 +64,7 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
           {error && <p className="error">{error}</p>}
           <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? 'Sending…' : 'Request code'}</button>
           <p className="hint">
-            We text you a one-time code. Demo OTP is <b>123456</b> (shown in the server console in dev).
+            We text you a one-time code. In local development the code is also shown in the server console.
           </p>
         </form>
       ) : (

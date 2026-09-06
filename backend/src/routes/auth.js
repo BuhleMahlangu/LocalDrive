@@ -12,10 +12,10 @@ router.post('/otp/request', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-router.post('/otp/verify', (req, res, next) => {
+router.post('/otp/verify', async (req, res, next) => {
   try {
     const { phone, code, name, email, role } = req.body;
-    const result = authService.verifyOtp({ phone, code, name, email, role });
+    const result = await authService.verifyOtp({ phone, code, name, email, role });
     if (!result.success) return res.status(401).json(result);
     res.json(result);
   } catch (e) { next(e); }

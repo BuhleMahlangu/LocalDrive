@@ -29,7 +29,7 @@ test('requestOtp stores a code that verifyOtp accepts (customer)', async () => {
   assert.ok(row, 'OTP row should exist');
   assert.match(String(row.code), /^\d{6}$/);
 
-  const result = authService.verifyOtp({ phone, code: row.code, role: 'customer' });
+  const result = await authService.verifyOtp({ phone, code: row.code, role: 'customer' });
   assert.equal(result.success, true);
   assert.equal(result.user.role, 'customer');
   assert.equal(result.user.phone, phone);
@@ -39,7 +39,7 @@ test('verifyOtp rejects a wrong code and counts an attempt', async () => {
   const phone = '+27820000004';
   await authService.requestOtp({ phone, role: 'customer' });
 
-  const bad = authService.verifyOtp({ phone, code: '000000', role: 'customer' });
+  const bad = await authService.verifyOtp({ phone, code: '000000', role: 'customer' });
   assert.equal(bad.success, false);
   assert.match(bad.error, /Incorrect code/);
 
@@ -52,7 +52,7 @@ test('verifyOtp rejects an expired code', async () => {
   const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   repo.saveOtp(phone, '123456', past);
 
-  const result = authService.verifyOtp({ phone, code: '123456', role: 'customer' });
+  const result = await authService.verifyOtp({ phone, code: '123456', role: 'customer' });
   assert.equal(result.success, false);
   assert.match(result.error, /expired/i);
 });
@@ -62,8 +62,8 @@ test('verifyOtp rejects a second use of the same code', async () => {
   await authService.requestOtp({ phone, role: 'customer' });
   const { code } = repo.getOtp(phone);
 
-  assert.equal(authService.verifyOtp({ phone, code, role: 'customer' }).success, true);
-  const again = authService.verifyOtp({ phone, code, role: 'customer' });
+  assert.equal((await authService.verifyOtp({ phone, code, role: 'customer' })).success, true);
+  const again = await authService.verifyOtp({ phone, code, role: 'customer' });
   assert.equal(again.success, false);
   assert.match(again.error, /No code requested/);
 });
@@ -72,7 +72,7 @@ test('strangers cannot register as the driver', async () => {
   const stranger = '+27820000002';
   await authService.requestOtp({ phone: stranger, role: 'driver' });
 
-  const result = authService.verifyOtp({ phone: stranger, code: repo.getOtp(stranger).code, role: 'driver' });
+  const result = await authService.verifyOtp({ phone: stranger, code: repo.getOtp(stranger).code, role: 'driver' });
   assert.equal(result.success, false);
   assert.match(result.error, /not the registered driver/i);
 
@@ -85,7 +85,7 @@ test('the owner phone may create a driver account on first login', async () => {
   const owner = config.driverPhone;
   await authService.requestOtp({ phone: owner, role: 'driver' });
 
-  const result = authService.verifyOtp({ phone: owner, code: repo.getOtp(owner).code, role: 'driver' });
+  const result = await authService.verifyOtp({ phone: owner, code: repo.getOtp(owner).code, role: 'driver' });
   assert.equal(result.success, true);
   assert.equal(result.user.role, 'driver');
   assert.equal(result.user.phone, owner);
@@ -94,10 +94,10 @@ test('the owner phone may create a driver account on first login', async () => {
 test('an existing customer is not promoted to driver by choosing driver', async () => {
   const phone = '+27820000003';
   await authService.requestOtp({ phone, role: 'customer' });
-  authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'customer' });
+  await authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'customer' });
 
   await authService.requestOtp({ phone, role: 'driver' });
-  const result = authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'driver' });
+  const result = await authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'driver' });
   assert.equal(result.success, true);
   assert.equal(result.user.role, 'customer', 'role must stay customer');
 });

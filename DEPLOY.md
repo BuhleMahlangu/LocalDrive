@@ -6,7 +6,7 @@ This guide takes the app live for a small single-driver service: a VPS (or alway
 
 - A domain (e.g. `drivelocal.example.co.za`) pointing to your server's public IP.
 - A server with Node.js 18+ (we recommend Node 20/22 LTS). Ubuntu/Debian assumed below.
-- Real keys from: **Twilio** (SMS), **Yoco** (card payments — optional for launch), and VAPID keys for push (`npx web-push generate-vapid-keys`).
+- Real keys from: **ClickSend** (OTP SMS), **Yoco** (card payments — optional for launch), and VAPID keys for push (`npx web-push generate-vapid-keys`).
 
 ## 2. Directory layout
 
@@ -98,9 +98,9 @@ PORT=4000
 JWT_SECRET=<64+ random chars — the server refuses weak values in production>
 JWT_EXPIRES=30d
 DRIVER_PHONE=+27000000000        # the owner driver — gates driver login
-TWILIO_ACCOUNT_SID=...
-TWILIO_AUTH_TOKEN=...
-TWILIO_FROM_NUMBER=+1XXXXXXX     # Twilio number (South African sender preferred)
+CLICKSEND_USERNAME=<your ClickSend account username>
+CLICKSEND_API_KEY=<from ClickSend dashboard > API keys>
+SMS_FROM=                         # optional alpha tag (WASPA-registered) or leave blank
 CORS_ORIGINS=https://drivelocal.example.co.za
 DB_DRIVER=sqlite
 GOOGLE_MAPS_API_KEY=             # optional, enables real roads/ETA
@@ -115,7 +115,7 @@ YOCO_SUCCESS_URL=https://drivelocal.example.co.za/?payment=success
 YOCO_CANCEL_URL=https://drivelocal.example.co.za/?payment=cancelled
 ```
 
-> The server **will not start** in production without JWT + Twilio + DRIVER_PHONE. That's deliberate.
+> The server **will not start** in production without JWT + ClickSend credentials + DRIVER_PHONE. That's deliberate.
 
 ## 8. Enabling card payments (Yoco)
 

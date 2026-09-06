@@ -31,8 +31,8 @@ async function requestOtp({ phone, role: _role }) {
     throw err;
   }
 
-  // The convenience fixed code is only for local development. Any real
-  // deployment (development/staging/production) generates a random OTP.
+  // The convenience fixed code is only for local development. Any other
+  // environment generates a random OTP, which is then delivered by `sms.send`.
   const code = config.nodeEnv === 'development' ? '123456' : makeOtp();
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
@@ -45,8 +45,29 @@ async function requestOtp({ phone, role: _role }) {
   return { phone: normalized, expiresInSeconds: OTP_TTL_MIN * 60, dev: config.nodeEnv !== 'production' };
 }
 
+function lookupUserByPhone(normalized, role) {
+  let user = repo.getUserByPhone(normalized, role === 'driver' ? 'driver' : 'customer');
+  // Allow the same phone to be both a customer and a driver when roles differ.
+  if (!user) user = repo.getUserByPhone(normalized, undefined);
+  return user;
+}
+
+function createUserOrReject(normalized, role, name, email) {
+  const createRole = role === 'driver' ? 'driver' : 'customer';
+  // Critical: never let a stranger register as the driver. Only the phone in
+  // config.driverPhone may create a driver account (e.g. first login from the
+  // owner's device). Everyone else gets a customer account.
+  if (createRole === 'driver' && normalized !== config.driverPhone) {
+    return null;
+  }
+  return repo.createUser({ phone: normalized, name, email, role: createRole });
+}
+
 function verifyOtp({ phone, code, name, email, role }) {
   const normalized = normalizePhone(phone);
+
+  // The code is generated + stored locally (see requestOtp) and delivered by
+  // `sms.send`; validate against our own record in every environment.
   const otp = repo.getOtp(normalized);
   if (!otp) return { success: false, error: 'No code requested' };
 
@@ -65,19 +86,10 @@ function verifyOtp({ phone, code, name, email, role }) {
 
   repo.deleteOtp(normalized);
 
-  let user = repo.getUserByPhone(normalized, role === 'driver' ? 'driver' : 'customer');
-  // Allow the same phone to be both a customer and a driver when roles differ.
-  if (!user) user = repo.getUserByPhone(normalized, undefined);
-
+  let user = lookupUserByPhone(normalized, role);
   if (!user) {
-    const createRole = role === 'driver' ? 'driver' : 'customer';
-    // Critical: never let a stranger register as the driver. Only the phone in
-    // config.driverPhone may create a driver account (e.g. first login from the
-    // owner's device). Everyone else gets a customer account.
-    if (createRole === 'driver' && normalized !== config.driverPhone) {
-      return { success: false, error: 'This number is not the registered driver' };
-    }
-    user = repo.createUser({ phone: normalized, name, email, role: createRole });
+    user = createUserOrReject(normalized, role, name, email);
+    if (!user) return { success: false, error: 'This number is not the registered driver' };
   }
 
   const token = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpires });

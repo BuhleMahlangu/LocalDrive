@@ -12,10 +12,14 @@ const config = {
   // the driver-only routes to this phone is what stops a stranger registering
   // as "the driver" and seeing other customers' bookings.
   driverPhone: process.env.DRIVER_PHONE || '+27000000000',
-  twilio: {
-    accountSid: process.env.TWILIO_ACCOUNT_SID,
-    authToken: process.env.TWILIO_AUTH_TOKEN,
-    from: process.env.TWILIO_FROM_NUMBER,
+  // ClickSend delivers the OTP SMS. The API authenticates with the account
+  // username + API key (Basic auth). `from` is optional (alpha tag must be
+  // WASPA-registered for SA; leave blank to use the account's default sender).
+  clickSend: {
+    username: process.env.CLICKSEND_USERNAME,
+    apiKey: process.env.CLICKSEND_API_KEY,
+    from: process.env.SMS_FROM,
+    source: process.env.SMS_SOURCE || 'DriveLocal',
   },
   yoco: {
     secretKey: process.env.YOCO_SECRET_KEY,
@@ -46,8 +50,8 @@ if (nodeEnv === 'production') {
   if (!jwtSecret || jwtSecret === 'dev-secret-change-me' || jwtSecret.length < 32) {
     problems.push('JWT_SECRET must be a strong random secret (32+ characters)');
   }
-  if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_FROM_NUMBER) {
-    problems.push('Twilio credentials (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_FROM_NUMBER) are required to deliver OTP SMS');
+  if (!process.env.CLICKSEND_USERNAME || !process.env.CLICKSEND_API_KEY) {
+    problems.push('ClickSend credentials (CLICKSEND_USERNAME / CLICKSEND_API_KEY) are required to deliver OTP SMS');
   }
   if (!process.env.DRIVER_PHONE) {
     problems.push('DRIVER_PHONE must be set to the owner-driver phone in E.164 format');

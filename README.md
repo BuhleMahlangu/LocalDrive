@@ -17,7 +17,7 @@ LocalDrive/
 |-------|------|
 | Frontend | React 18 + Vite + Leaflet (OSM maps) + Socket.io client, PWA installable |
 | Backend | Node.js + Express + Socket.io + better-sqlite3 (SQLite) |
-| Auth | Phone OTP (Twilio in prod, console in dev) + JWT |
+| Auth | Phone OTP (ClickSend in prod, console in dev) + JWT |
 | Payments | Yoco hosted checkout (card) — cash by default until `YOCO_SECRET_KEY` is set |
 | Real-time | Socket.io (driver GPS streaming every 3s + live trip pushes) |
 | Currency | ZAR (South African Rand) |
@@ -83,7 +83,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 |----------|---------|
 | `DRIVER_PHONE` | The owner-driver's phone (E.164). Gates who may act as driver. Default `+27000000000` |
 | `JWT_SECRET` | Token signing. Production refuses to start unless it's a strong random value (32+ chars) |
-| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM_NUMBER` | Real SMS OTP. In dev, OTPs print to the backend console (`123456`); any other env generates a random code |
+| `CLICKSEND_USERNAME` / `CLICKSEND_API_KEY` / `SMS_FROM` | Real SMS OTP via **ClickSend** (pay-as-you-go; `SMS_FROM` is an optional SA-friendly sender). In dev, OTPs print to the backend console (`123456`); any other env generates a random code |
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
@@ -92,7 +92,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 
 OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop SMS-bombing.
 
-> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET`, Twilio credentials, or `DRIVER_PHONE` are missing or weak. Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
+> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET`, ClickSend credentials, or `DRIVER_PHONE` are missing or weak. Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
 
 ## Tests, lint, backups
 
@@ -111,7 +111,7 @@ npm run build       # production build + PWA service worker
 ## Roadmap / when you go live
 
 - **Enable card payments** — add real `YOCO_SECRET_KEY` + `YOCO_WEBHOOK_SECRET`, set success/cancel URLs to your HTTPS domain.
-- **Real SMS OTP** — add live `TWILIO_*` keys and set `NODE_ENV=production`.
+- **Real SMS OTP** — add live `CLICKSEND_USERNAME` / `CLICKSEND_API_KEY` (and an SA `SMS_FROM` if wanted), then set `NODE_ENV=production`.
 - **Real routing** — add a `GOOGLE_MAPS_API_KEY` for true road distances/ETAs.
 - **HTTPS hosting** — required for web push, in-app geolocation and secure payments. See `DEPLOY.md`.
 - **Driver payouts** — MVP pays 100% to the owner (single driver). Yoco payouts if you ever split fares.
