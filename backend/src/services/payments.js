@@ -143,6 +143,54 @@ function getStatus({ tripId, customerId }) {
   return { trip, payment: pay, paid: !!(pay && pay.status === 'succeeded') };
 }
 
+// Refund a completed card payment back to the customer's card via Yoco.
+// Only card payments that have actually succeeded are eligible; cash trips are
+// settled in person and can't be refunded through us.
+async function refundPayment({ tripId, customerId } = {}) {
+  const trip = payableTrip(tripId, customerId);
+  const pay = repo.getPaymentByTrip(tripId);
+  if (!pay) {
+    const err = new Error('No payment found for this trip');
+    err.status = 404;
+    throw err;
+  }
+  if (pay.provider !== 'yoco') {
+    const err = new Error('Only card payments can be refunded');
+    err.status = 409;
+    throw err;
+  }
+  if (pay.status === 'refunded') {
+    return { refunded: true, trip, payment: pay };
+  }
+  if (pay.status !== 'succeeded' || !pay.paymentIntentId) {
+    const err = new Error('This payment is not refundable');
+    err.status = 409;
+    throw err;
+  }
+  const refund = await yocoFetch('/refunds', {
+    method: 'POST',
+    idempotencyKey: `refund-${tripId}`,
+    body: {
+      checkoutId: pay.paymentIntentId,
+      amountInCents: pay.amountCents,
+      description: `Refund for trip ${tripId}`,
+    },
+  });
+  const payment = repo.markPaymentRefunded(tripId, { refundId: refund && refund.id });
+  return { refunded: true, refund, trip: repo.getTripById(tripId), payment };
+}
+
+// Driver-initiated refund: verify the driver owns the given trip first.
+async function refundTripForDriver(driverId, tripId) {
+  const trip = repo.getTripById(tripId);
+  if (!trip || trip.driverId !== driverId) {
+    const err = new Error('Trip not found');
+    err.status = 404;
+    throw err;
+  }
+  return refundPayment({ tripId });
+}
+
 // Finalise a successful local payment (webhook or confirmed via API).
 function markPaid(tripId, pay, checkout) {
   const amount = (checkout && checkout.amount != null ? checkout.amount : pay.amountCents) / 100;
@@ -260,4 +308,4 @@ async function handleWebhook(req, notify) {
   return { received: true };
 }
 
-module.exports = { createCheckout, confirmPayment, getStatus, handleWebhook };
+module.exports = { createCheckout, confirmPayment, getStatus, refundPayment, refundTripForDriver, handleWebhook };

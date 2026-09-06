@@ -10,6 +10,8 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [tip, setTip] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [payment, setPayment] = useState(null);
+  const [refunding, setRefunding] = useState(false);
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -29,6 +31,13 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     return () => socket.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Payment status for the fare card — only relevant once the trip is complete.
+  useEffect(() => {
+    if (trip?.id && trip.status === 'completed') {
+      api(`/payments/status?tripId=${trip.id}`).then((r) => r.payment && setPayment(r.payment)).catch(() => {});
+    }
+  }, [trip?.id, trip.status]);
 
   useEffect(() => {
     if (trip?.pickup && trip?.destination) {
@@ -54,6 +63,15 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       .then((res) => setTrip(res.trip))
       .catch((err) => setError(err.message))
       .finally(() => setBusy(false));
+  }
+
+  function requestRefund() {
+    setRefunding(true);
+    setError('');
+    api(`/payments/refund`, { method: 'POST', body: { tripId: trip.id } })
+      .then((res) => { setPayment(res.payment); setTrip(res.trip); })
+      .catch((err) => setError(err.message))
+      .finally(() => setRefunding(false));
   }
 
   const markers = useMemo(() => {
@@ -122,12 +140,29 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
 
         {status === 'completed' && (
           <div className="complete-box">
-            <h2>{formatRand(trip.finalFare)}</h2>
-            {trip.tipAmount > 0 && <p className="subtitle">including {formatRand(trip.tipAmount)} tip</p>}
+            <div className="fare-summary">
+              <div>
+                <span className="fare-label">Estimated fare</span>
+                <span className="fare-line strikethrough">{formatRand(trip.fareEstimate)}</span>
+              </div>
+              <div>
+                <span className="fare-label">Final fare</span>
+                <span className="fare-line">{formatRand(trip.finalFare)}</span>
+              </div>
+            </div>
             <p className="subtitle">{trip.distanceKm} km · {trip.durationMin} min</p>
+            {trip.tipAmount > 0 && <p className="subtitle">including {formatRand(trip.tipAmount)} tip</p>}
 
             {trip.paymentMethod === 'card' && (
-              <CardPay trip={trip} onPaid={setTrip} />
+              <CardPay trip={trip} payment={payment} onPaid={setTrip} onPayment={setPayment} onRefund={requestRefund} refunding={refunding} />
+            )}
+
+            {trip.paymentMethod === 'cash' && (
+              <div className={`pay-state ${payment?.status === 'succeeded' ? 'ok' : ''}`}>
+                {payment?.status === 'succeeded'
+                  ? 'Paid — cash collected by driver'
+                  : 'Cash payment due to driver'}
+              </div>
             )}
 
             {!rated ? (
@@ -175,9 +210,13 @@ function statusLabel(s) {
   }
 }
 
-function CardPay({ trip, onPaid }) {
+function CardPay({ trip, payment, onPaid, onPayment, onRefund, refunding }) {
   const [step, setStep] = useState('idle'); // idle | creating | checking | paid
   const [error, setError] = useState('');
+
+  const payStatus = payment?.status;
+  const cardPaid = payStatus === 'succeeded';
+  const cardRefunded = payStatus === 'refunded';
 
   // Create the Yoco hosted checkout and redirect the customer to Yoco's secure
   // page. The success/cancel URLs send them back to this SPA (?payment=...),
@@ -215,6 +254,7 @@ function CardPay({ trip, onPaid }) {
       .then((res) => {
         if (res.paid) {
           onPaid(res.trip);
+          if (res.payment) onPayment(res.payment);
           setStep('paid');
         } else {
           setStep('idle');
@@ -231,8 +271,22 @@ function CardPay({ trip, onPaid }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip.id]);
 
-  if (step === 'paid') {
-    return <p className="success">Card payment successful 🎉</p>;
+  if (cardPaid || step === 'paid') {
+    return (
+      <div className="card-pay paid">
+        <p className="success">Card payment successful</p>
+        {trip.tipAmount > 0 && <p className="subtitle">including {formatRand(trip.tipAmount)} tip</p>}
+        {onRefund && (
+          <button className="link-btn" onClick={onRefund} disabled={refunding || cardRefunded}>
+            {cardRefunded ? 'Refunded' : 'Request refund'}
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (cardRefunded) {
+    return <p className="success">Card payment refunded</p>;
   }
 
   return (
@@ -240,7 +294,7 @@ function CardPay({ trip, onPaid }) {
       <p className="subtitle">Pay {formatRand(trip.finalFare)} by card</p>
       <p className="hint">You'll be taken to a secure payment page. Cash is always welcome as well.</p>
       <button className="btn primary" onClick={begin} disabled={step !== 'idle'}>
-        {step === 'creating' ? 'Preparing…' : step === 'checking' ? 'Checking payment…' : '💳 Pay by card'}
+        {step === 'creating' ? 'Preparing…' : step === 'checking' ? 'Checking payment…' : 'Pay by card'}
       </button>
       {error && <p className="error">{error}</p>}
     </div>

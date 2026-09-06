@@ -36,4 +36,13 @@ router.get('/status', authRequired(['customer']), (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Customer: request a refund of a successful card payment.
+router.post('/refund', authRequired(['customer']), async (req, res, next) => {
+  try {
+    const { tripId } = req.body;
+    const result = await payments.refundPayment({ tripId, customerId: req.user.id });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 module.exports = router;

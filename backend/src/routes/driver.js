@@ -1,10 +1,11 @@
-const express = require('express');
+const { Router } = require('express');
 const repo = require('../db/repository');
 const { authRequired, ownerDriverOnly } = require('../middleware');
 const tripService = require('../services/trips');
+const payments = require('../services/payments');
 
 function driverRoutes({ notify }) {
-  const router = express.Router();
+  const router = Router();
   router.use(authRequired(['driver']));
   router.use(ownerDriverOnly);
 
@@ -106,11 +107,21 @@ function driverRoutes({ notify }) {
   // Complete trip.
   router.post('/trips/:id/complete', async (req, res, next) => {
     try {
-      const { actualDistanceKm, actualDurationMin, tipAmount } = req.body;
+      const { actualDistanceKm, actualDurationMin } = req.body;
       const result = await tripService.completeTrip(req.params.id, req.user.id, {
-        actualDistanceKm, actualDurationMin, tipAmount,
+        actualDistanceKm, actualDurationMin,
       });
       notify.tripUpdated(result.trip);
+      res.json(result);
+    } catch (e) { next(e); }
+  });
+
+  // Refund a card payment (driver-initiated, e.g. after a dispute or mistake).
+  router.post('/trips/:id/refund', async (req, res, next) => {
+    try {
+      const tripId = req.params.id;
+      const result = await payments.refundTripForDriver(req.user.id, tripId);
+      notify.paymentUpdated(result.payment, result.trip);
       res.json(result);
     } catch (e) { next(e); }
   });

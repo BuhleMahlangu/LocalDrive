@@ -157,15 +157,24 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
     duration_min: actualDurationMin ?? trip.durationMin,
   });
 
-  // Create the payment record (cash by default; card paid via Yoco later).
-  const payment = repo.createPayment({
+  // Create the payment record. Cash trips are settled now (money handed
+  // directly to the driver). Card trips stay pending until the customer
+  // completes the hosted Yoco checkout.
+  repo.createPayment({
     tripId,
     amountCents: pricing.dollarsToCents(estimate.total),
     provider: trip.paymentMethod === 'card' ? 'yoco' : 'cash',
     currency: config.currency,
   });
 
-  return { trip: updated, payment };
+  if (trip.paymentMethod !== 'card') {
+    repo.markPaymentSucceeded(tripId, {
+      driverPayoutCents: pricing.dollarsToCents(estimate.total),
+      platformFeeCents: 0,
+    });
+  }
+
+  return { trip: updated, payment: repo.getPaymentByTrip(tripId) };
 }
 
 async function cancelTrip(tripId, actor, reason) {
@@ -216,13 +225,19 @@ async function rateTrip(tripId, customerId, stars, tipAmount) {
       tipAmount,
     });
     repo.updateTrip(tripId, { tip_amount: estimate.tipAmount, final_fare: estimate.total });
+    // Keep the payment record in sync with the new total when the trip is
+    // cash (card amounts are fixed at checkout time and can't be adjusted
+    // retrospectively — a tip on a card trip is informational only).
     const payment = repo.getPaymentByTrip(tripId);
-    // Cash trips are finalised here (money handed over during the ride). Card
-    // trips stay pending until Yoco confirms the charge via webhook/confirm.
-    if (payment && payment.provider === 'cash') repo.markPaymentSucceeded(tripId, {
-      driverPayoutCents: pricing.dollarsToCents(estimate.total),
-      platformFeeCents: 0,
-    });
+    if (payment && payment.provider === 'cash') {
+      repo.updatePaymentAmount(tripId, pricing.dollarsToCents(estimate.total));
+      if (payment.status !== 'succeeded') {
+        repo.markPaymentSucceeded(tripId, {
+          driverPayoutCents: pricing.dollarsToCents(estimate.total),
+          platformFeeCents: 0,
+        });
+      }
+    }
   }
   return repo.getTripById(tripId);
 }

@@ -339,6 +339,19 @@ module.exports = {
     return this.getPaymentByTrip(tripId);
   },
 
+  updatePaymentAmount(tripId, amountCents) {
+    db.prepare('UPDATE payments SET amount_cents = ? WHERE trip_id = ?').run(amountCents, tripId);
+    return this.getPaymentByTrip(tripId);
+  },
+
+  markPaymentRefunded(tripId, { refundId } = {}) {
+    db.prepare(
+      `UPDATE payments SET status = 'refunded', payment_intent_id = COALESCE(?, payment_intent_id),
+       paid_at = paid_at WHERE trip_id = ?`,
+    ).run(refundId || null, tripId);
+    return this.getPaymentByTrip(tripId);
+  },
+
   // ---------- Push subscriptions ----------
   savePushSubscription(userId, { endpoint, p256dh, auth }) {
     db.prepare(
