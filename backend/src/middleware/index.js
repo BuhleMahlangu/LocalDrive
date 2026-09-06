@@ -15,7 +15,12 @@ function authRequired(roles) {
       const payload = jwt.verify(token, config.jwtSecret);
       const user = repo.getUserById(payload.sub);
       if (!user) return res.status(401).json({ error: 'User not found' });
-      if (roles && !roles.includes(user.role)) {
+      // The single operator is trusted with every role on their own phone
+      // (their account is 'driver', but they also preview/test the customer
+      // app and card payments from the same device).
+      const isOwner = user.role === 'driver' && user.phone === config.driverPhone;
+      const allowed = (roles && roles.includes(user.role)) || (isOwner && roles && roles.includes('customer'));
+      if (roles && !allowed) {
         return res.status(403).json({ error: 'Forbidden' });
       }
       req.user = user;
