@@ -22,6 +22,7 @@ const config = {
     source: process.env.SMS_SOURCE || 'DriveLocal',
   },
   yoco: {
+    publishableKey: process.env.YOCO_PUBLISHABLE_KEY,
     secretKey: process.env.YOCO_SECRET_KEY,
     webhookSecret: process.env.YOCO_WEBHOOK_SECRET,
     apiBase: process.env.YOCO_API_BASE || 'https://payments.yoco.com/api',
