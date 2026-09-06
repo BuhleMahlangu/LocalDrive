@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+app/dist/
+
+# Environment / secrets — .env may contain real Twilio/Yoco credentials
+.env
+*.local
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local database + backups. The SQLite file is the source of truth and lives
+# on the server; backups go into backend/backups/ (keep them out of git).
+backend/data/
+backend/backups/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

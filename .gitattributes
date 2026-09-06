@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# Binary files should never be treated as text
+*.png binary
+*.ico binary
+*.sqlite binary
+*.zip binary

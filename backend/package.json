@@ -1,0 +1,36 @@
+{
+  "name": "drivelocal-backend",
+  "version": "0.1.0",
+  "description": "DriveLocal MVP backend - Express + Socket.io",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/scripts/seed.js",
+    "backup": "node src/scripts/backup.js",
+    "smoke": "node scripts/smoke.js",
+    "test": "node --test",
+    "lint": "eslint src test scripts"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.5",
+    "twilio": "^6.1.0",
+    "web-push": "^3.6.7"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "allowScripts": {},
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "globals": "^17.12.0"
+  }
+}
