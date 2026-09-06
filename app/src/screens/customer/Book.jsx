@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Map from '../../components/Map.jsx';
 import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
+import geolocate from '../../lib/geolocate.js';
 
 // The app serves the Kriel / Thubelihle area (Mpumalanga, South Africa), where
 // many places don't have usable street names. Map centre defaults to that area
 // and the flow is built around landmarks + a free-text "describe this place" note
 // so the customer and driver can find each other easily.
 const AREA_CENTER = { lat: -26.2155, lng: 29.2916 }; // Thubelihle, Kriel
-const AREA_NAME = 'Thubelihle, Kriel (Mpumalanga)';
 // Live driver phone (the owner) so customers can call/WhatsApp directly.
 const DRIVER_PHONE = import.meta.env.VITE_DRIVER_PHONE || '+27000000000';
 const DRIVER_VEHICLE = 'Chevrolet Spark LT';
@@ -33,7 +33,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
   const [estimate, setEstimate] = useState(null);
   const [route, setRoute] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [locating, setLocating] = useState(true);
+  const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState(false);
   const [error, setError] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -46,28 +46,24 @@ export default function Book({ onBack, onRequest, presetDest }) {
   // For re-booking, show a hint that the destination is pre-set.
   const isRebook = !!presetDest && !!dest;
 
-  // Auto-detect pickup location once. If geolocation fails or is denied, fall
-  // back to the service area centre so the customer can still drop a pin.
-  useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setPickup({ lat: pos.coords.latitude, lng: pos.coords.longitude, address: 'Current location', note: '' });
-          setLocateError(false);
-          setLocating(false);
-        },
-        () => {
-          setPickup({ ...AREA_CENTER, address: AREA_NAME, note: '' });
-          setLocateError(true);
-          setLocating(false);
-        },
-        { enableHighAccuracy: true, timeout: 8000 },
-      );
-    } else {
-      setPickup({ ...AREA_CENTER, address: AREA_NAME, note: '' });
-      setLocateError(true);
-      setLocating(false);
-    }
+  // We intentionally do NOT auto-request location on mount. Browsers require a
+  // user gesture to show the location permission prompt for the first time; an
+  // on-load getCurrentPosition is silently skipped or denied. So the pickup
+  // stays empty until the customer taps the 🎯 button (or drops a pin), at which
+  // point we take a precise, verified burst of fixes.
+  const doLocate = useCallback(() => {
+    setLocating(true);
+    setError('');
+    geolocate()
+      .then(({ lat, lng, accuracy }) => {
+        setPickup({ lat, lng, accuracy, address: 'Current location', note: '' });
+        setLocateError(false);
+      })
+      .catch((err) => {
+        setLocateError(true);
+        setError(geoMessage(err?.message));
+      })
+      .finally(() => setLocating(false));
   }, []);
 
   // Card payments only work when Yoco is configured on the server; otherwise
@@ -78,24 +74,22 @@ export default function Book({ onBack, onRequest, presetDest }) {
       .catch(() => setCardEnabled(false));
   }, []);
 
-  // When a landmark is chosen, prefill the description. If a pin isn't placed
-  // yet, drop one at the map centre so a fare can be estimated right away — the
-  // customer then fine-tunes by tapping the map. (In this area there is no
-  // address lookup, so the pin + description together tell the driver where.)
+  // When a landmark is chosen, use it as the human description. If a pin isn't
+  // placed yet we only fill in the description — we do NOT drop a pin for the
+  // customer, because any guessed spot (e.g. the map centre) would be wrong and
+  // skew the fare and the pickup. The customer places the pin by tapping the map.
   const applyLandmark = useCallback((type, lm) => {
     const label = `${lm.icon} ${lm.label}`;
     if (type === 'pickup') {
       setPickupLandmark(lm.label);
-      setPickup((p) => (p ? { ...p, address: label } : { ...AREA_CENTER, address: label }));
+      setPickupNote((n) => n || label);
+      setPickup((p) => (p ? { ...p, address: label } : p));
     } else {
       setDestLandmark(lm.label);
-      setDest((d) => {
-        if (d) return { ...d, address: label };
-        const base = pickup || AREA_CENTER;
-        return { lat: base.lat, lng: base.lng, address: label };
-      });
+      setDestNote((n) => n || label);
+      setDest((d) => (d ? { ...d, address: label } : d));
     }
-  }, [pickup]);
+  }, []);
 
   // Recompute estimate + route when both points exist / change.
   useEffect(() => {
@@ -140,24 +134,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
 
   function locatePickup(e) {
     e.stopPropagation();
-    if (!navigator.geolocation) {
-      setError('Location not available on this device');
-      return;
-    }
-    setLocating(true);
-    setError('');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setPickup({ lat: pos.coords.latitude, lng: pos.coords.longitude, address: 'Current location', note: '' });
-        setLocating(false);
-      },
-      () => {
-        setLocating(false);
-        setError('Could not get your location — tap the map to set where you are instead.');
-        setLocateError(true);
-      },
-      { enableHighAccuracy: true, timeout: 8000 },
-    );
+    doLocate();
   }
 
   function confirm() {
@@ -186,7 +163,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
 
   const markers = useMemo(() => {
     const m = [];
-    if (pickup) m.push({ lat: pickup.lat, lng: pickup.lng, type: 'home' });
+    if (pickup) m.push({ lat: pickup.lat, lng: pickup.lng, type: 'home', accuracy: pickup.accuracy });
     if (dest) m.push({ lat: dest.lat, lng: dest.lng, type: 'dest' });
     return m;
   }, [pickup, dest]);
@@ -215,13 +192,19 @@ export default function Book({ onBack, onRequest, presetDest }) {
           <span className="field-label">Pickup — where the driver picks you up</span>
           <div className="field-row">
             <input
-              value={pickup?.address || (locating ? 'Detecting location…' : 'Pickup')}
+              value={pickup?.address || ''}
+              placeholder={locating ? 'Detecting location…' : 'Tap 🎯 or the map to set pickup'}
               readOnly
             />
             <button type="button" className="btn small" onClick={locatePickup} title="Use my current location">🎯</button>
           </div>
           {locateError && !locating && (
             <p className="hint" style={{ margin: '4px 0 0' }}>Tap the map to drop a pin for your pickup instead.</p>
+          )}
+          {!locateError && pickup?.accuracy != null && (
+            <p className="hint" style={{ margin: '4px 0 0' }}>
+              {locating ? 'Finding precise location…' : `GPS accuracy ±${Math.round(pickup.accuracy)} m${pickup.accuracy > 40 ? ' — tap the map to fine-tune' : ''}`}
+            </p>
           )}
 
           <div className="landmark-row">
@@ -367,6 +350,24 @@ export default function Book({ onBack, onRequest, presetDest }) {
       </div>
     </div>
   );
+}
+
+function geoMessage(code) {
+  switch (code) {
+    case 'geolocation-unsupported':
+      return 'Location needs a secure connection (HTTPS or localhost) — tap the map to set your pickup instead.';
+    case 'permission-denied':
+      return 'Location is blocked. Allow Location for this site, then tap 🎯 again — or tap the map to set your pickup.';
+    case 'position-unavailable':
+      return 'Your location is currently unavailable. Tap the map to set where you are instead.';
+    case 'position-timeout':
+      return 'Your location is taking too long to load. Tap the map to set where you are instead.';
+    case 'low-accuracy':
+      return 'Could not pinpoint you precisely. Tap the map to set where you are instead.';
+    default:
+      // Preflight "blocked" reasons are already descriptive — pass them through.
+      return code || 'Could not get your location — tap the map to set where you are instead.';
+  }
 }
 
 function decodePolyline(encoded) {

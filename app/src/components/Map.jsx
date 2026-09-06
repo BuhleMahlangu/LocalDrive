@@ -54,6 +54,7 @@ export default function Map({
   const layerRef = useRef(null);
   const polyRef = useRef(null);
   const markersRef = useRef([]);
+  const circlesRef = useRef({});
   const fittedRef = useRef(false);
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export default function Map({
       layerRef.current = null;
       polyRef.current = null;
       markersRef.current = [];
+      circlesRef.current = {};
       fittedRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,15 +101,47 @@ export default function Map({
       }
     });
 
-    // Add markers that are new.
+    // Add markers that are new (reuse the layer when the key already existed so
+    // the leaflet marker stays in place).
     next.forEach((m) => {
-      if (!existing.some((e) => e.key === m.key)) {
+      const prior = existing.find((e) => e.key === m.key);
+      if (prior) {
+        m.marker = prior.marker;
+      } else {
         let icon = null;
         if (m.type === 'driver') icon = carIcon;
         else if (m.type === 'home') icon = homeIcon;
         else if (m.type === 'dest') icon = destIcon;
-        const marker = L.marker([m.lat, m.lng], { icon }).addTo(layerRef.current);
-        m.marker = marker;
+        m.marker = L.marker([m.lat, m.lng], { icon }).addTo(layerRef.current);
+      }
+    });
+
+    // Accuracy radius for GPS-derived pins, keyed so coords/accuracy can update.
+    const wantedCircles = {};
+    next.forEach((m) => {
+      const hasAcc = m.accuracy != null && Number.isFinite(m.accuracy) && m.accuracy > 0;
+      if (!hasAcc) return;
+      const ckey = m.key;
+      wantedCircles[ckey] = true;
+      const circle = circlesRef.current[ckey];
+      const opts = {
+        radius: Math.max(m.accuracy, 5),
+        color: '#22c55e',
+        weight: 1.5,
+        fillColor: '#22c55e',
+        fillOpacity: 0.12,
+      };
+      if (circle) {
+        circle.setLatLng([m.lat, m.lng]);
+        circle.setRadius(opts.radius);
+      } else {
+        circlesRef.current[ckey] = L.circle([m.lat, m.lng], opts).addTo(layerRef.current);
+      }
+    });
+    Object.keys(circlesRef.current).forEach((ckey) => {
+      if (!wantedCircles[ckey]) {
+        map.removeLayer(circlesRef.current[ckey]);
+        delete circlesRef.current[ckey];
       }
     });
 
@@ -135,12 +169,12 @@ export default function Map({
           fittedRef.current = sig;
           map.fitBounds(L.latLngBounds(pts).pad(0.2), { maxZoom: 15, animate: false });
         }
-      } else if (next.length === 1 && next[0].type === 'driver') {
+      } else if (next.length === 1 && (next[0].type === 'driver' || next[0].type === 'home')) {
         const d = next[0];
         const sig = d.lat.toFixed(5) + ',' + d.lng.toFixed(5);
         if (sig !== fittedRef.current) {
           fittedRef.current = sig;
-          map.setView([d.lat, d.lng], Math.max(map.getZoom(), 13), { animate: false });
+          map.setView([d.lat, d.lng], Math.max(map.getZoom(), d.type === 'driver' ? 13 : 15), { animate: false });
         }
       }
     }
