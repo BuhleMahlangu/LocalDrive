@@ -339,6 +339,11 @@ module.exports = {
     return this.getPaymentByTrip(tripId);
   },
 
+  setPaymentStatus(tripId, status) {
+    db.prepare('UPDATE payments SET status = ? WHERE trip_id = ?').run(status, tripId);
+    return this.getPaymentByTrip(tripId);
+  },
+
   updatePaymentAmount(tripId, amountCents) {
     db.prepare('UPDATE payments SET amount_cents = ? WHERE trip_id = ?').run(amountCents, tripId);
     return this.getPaymentByTrip(tripId);

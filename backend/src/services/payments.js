@@ -91,7 +91,7 @@ async function createCheckout({ tripId, customerId }) {
       successUrl: config.yoco.successUrl,
       cancelUrl: config.yoco.cancelUrl,
       metadata: { tripId },
-      clientReferenceId: tripId,
+      externalId: tripId,
     },
   });
 
@@ -167,16 +167,16 @@ async function refundPayment({ tripId, customerId } = {}) {
     err.status = 409;
     throw err;
   }
-  const refund = await yocoFetch('/refunds', {
+  const refund = await yocoFetch(`/checkouts/${encodeURIComponent(pay.paymentIntentId)}/refund`, {
     method: 'POST',
     idempotencyKey: `refund-${tripId}`,
     body: {
-      checkoutId: pay.paymentIntentId,
-      amountInCents: pay.amountCents,
-      description: `Refund for trip ${tripId}`,
+      // Full refund unless the partial amount field is set explicitly.
+      amount: pay.amountCents,
+      metadata: { tripId, refundFor: 'DriveLocal trip' },
     },
   });
-  const payment = repo.markPaymentRefunded(tripId, { refundId: refund && refund.id });
+  const payment = repo.markPaymentRefunded(tripId, { refundId: (refund && refund.refundId) || undefined });
   return { refunded: true, refund, trip: repo.getTripById(tripId), payment };
 }
 
@@ -303,6 +303,17 @@ async function handleWebhook(req, notify) {
     repo.markPaymentFailed(tripId);
     const trip = repo.getTripById(tripId);
     if (trip && notify) notify.paymentUpdated(repo.getPaymentByTrip(tripId), trip);
+    return { received: true, tripId };
+  }
+  if (type === 'refund.succeeded') {
+    const trip = repo.getTripById(tripId);
+    if (trip && notify) notify.paymentUpdated(repo.markPaymentRefunded(tripId, { refundId: payload.id }), trip);
+    return { received: true, tripId };
+  }
+  if (type === 'refund.failed') {
+    // Refund was declined downstream — the original charge is still valid.
+    const trip = repo.getTripById(tripId);
+    if (trip && notify) notify.paymentUpdated(repo.setPaymentStatus(tripId, 'succeeded'), trip);
     return { received: true, tripId };
   }
   return { received: true };
