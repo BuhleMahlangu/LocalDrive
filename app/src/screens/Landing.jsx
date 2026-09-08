@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import Icon from '../components/Icon.jsx';
 
 export default function Landing({ onChoose }) {
   const [online, setOnline] = useState(null); // null = unknown
@@ -28,14 +29,19 @@ export default function Landing({ onChoose }) {
         )}
 
         <button type="button" className="btn primary big" onClick={() => onChoose('customer')}>
-          🚕 Book a ride
+          <Icon name="book" size={20} /> Book a ride
         </button>
-        <p className="hint">Live GPS tracking · cash or card · no street names needed.</p>
 
-        <div className="landing-divider">or</div>
+        <div className="hero-feats">
+          <span className="feat">Live GPS tracking</span>
+          <span className="feat">Cash or card</span>
+          <span className="feat">Drop-pin pickup</span>
+        </div>
+
+        <div className="landing-divider">Driver?</div>
 
         <button type="button" className="btn driver big" onClick={() => onChoose('driver')}>
-          🚗 I'm the driver
+          <Icon name="car" size={20} /> I'm the driver
         </button>
         <p className="hint">Driver login — accept requests and manage trips.</p>
       </div>

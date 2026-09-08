@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { currentTheme, setTheme } from '../api.js';
+import Icon from './Icon.jsx';
 
 export default function ThemeToggle() {
   const [dark, setDark] = useState(() => currentTheme() === 'dark');
@@ -12,7 +13,8 @@ export default function ThemeToggle() {
 
   return (
     <button type="button" className="theme-toggle" onClick={toggle} title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
-      {dark ? '☀️ Light' : '🌙 Dark'}
+      <Icon name={dark ? 'sun' : 'moon'} size={15} />
+      {dark ? 'Light' : 'Dark'}
     </button>
   );
 }

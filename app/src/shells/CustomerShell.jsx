@@ -4,6 +4,7 @@ import Book from '../screens/customer/Book.jsx';
 import ActiveTrip from '../screens/customer/ActiveTrip.jsx';
 import History from '../screens/customer/History.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import Icon from '../components/Icon.jsx';
 import { isDriverUser } from '../api.js';
 
 export default function CustomerShell({ user, onLogout, onSwitchRole }) {
@@ -49,7 +50,9 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
         <span className="brand">DriveLocal</span>
         <span className="user-chip">{user.name || user.phone}</span>
         {canBeDriver && (
-          <button className="chip-btn" onClick={() => onSwitchRole('driver')} title="Open driver dashboard">🚗 Driver mode</button>
+          <button className="chip-btn" onClick={() => onSwitchRole('driver')} title="Open driver dashboard">
+            <Icon name="swap" size={14} /> Driver mode
+          </button>
         )}
         <ThemeToggle />
         <button className="link-btn" onClick={onLogout}>Log out</button>
@@ -94,9 +97,15 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
       )}
 
       <nav className="bottom-nav">
-        <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('home')}>🏠 Home</button>
-        <button className={view === 'book' ? 'nav-btn active' : 'nav-btn'} onClick={() => { setActiveTrip(null); setView('book'); }}>🚕 Book</button>
-        <button className={view === 'history' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('history')}>📋 History</button>
+        <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('home')}>
+          <Icon name="home" className="nav-icon" /> Home
+        </button>
+        <button className={view === 'book' ? 'nav-btn active' : 'nav-btn'} onClick={() => { setActiveTrip(null); setView('book'); }}>
+          <Icon name="book" className="nav-icon" /> Book
+        </button>
+        <button className={view === 'history' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('history')}>
+          <Icon name="history" className="nav-icon" /> Trips
+        </button>
       </nav>
     </div>
   );

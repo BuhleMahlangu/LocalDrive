@@ -3,6 +3,7 @@ import Dashboard from '../screens/driver/Dashboard.jsx';
 import Profile from '../screens/driver/Profile.jsx';
 import Trips from '../screens/driver/Trips.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import Icon from '../components/Icon.jsx';
 
 export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   const [view, setView] = useState('dashboard');
@@ -18,7 +19,9 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
       <header className="dash-header">
         <span className="brand">DriveLocal · Driver</span>
         <span className="user-chip">{user.name || user.phone}</span>
-        <button className="chip-btn" onClick={() => onSwitchRole('customer')} title="Preview the customer app">🙂 Customer mode</button>
+        <button className="chip-btn" onClick={() => onSwitchRole('customer')} title="Preview the customer app">
+          <Icon name="swap" size={14} /> Customer mode
+        </button>
         <ThemeToggle />
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
@@ -34,9 +37,15 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
       </div>
 
       <nav className="bottom-nav">
-        <button className={view === 'dashboard' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('dashboard')}>🏠 Home</button>
-        <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')}>📋 Trips</button>
-        <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')}>⚙️ Profile</button>
+        <button className={view === 'dashboard' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('dashboard')}>
+          <Icon name="home" className="nav-icon" /> Home
+        </button>
+        <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')}>
+          <Icon name="trips" className="nav-icon" /> Trips
+        </button>
+        <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')}>
+          <Icon name="profile" className="nav-icon" /> Profile
+        </button>
       </nav>
     </div>
   );

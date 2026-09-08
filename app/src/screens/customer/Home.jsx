@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
 import NotificationsToggle from '../../components/NotificationsToggle.jsx';
 import SavedPlacesBar from '../../components/SavedPlaces.jsx';
+import Icon from '../../components/Icon.jsx';
 
 export default function Home({ user, onBook, onResume, onRebook, onPickPlace }) {
   const [driver, setDriver] = useState(null);
@@ -39,10 +40,14 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace }) 
 
   return (
     <div className="screen">
-      <h1>Hello{user.name ? `, ${user.name.split(' ')[0]}` : ''}</h1>
-      <p className="subtitle">Where are we headed?</p>
-
-      <button className="btn primary big" onClick={onBook}>🚕 Book a ride</button>
+      <div className="card book-hero">
+        <h1>Hello{user.name ? `, ${user.name.split(' ')[0]}` : ''} 👋</h1>
+        <p className="subtitle">Where are we headed today?</p>
+        <button className="btn primary big" onClick={onBook}>
+          <Icon name="book" size={21} /> Book a ride
+        </button>
+        <p className="hint" style={{ margin: '10px 0 0' }}>Live GPS · cash or card · no street names needed</p>
+      </div>
 
       {active && (
         <div className="card active-card">
