@@ -34,28 +34,53 @@ const destIcon = L.divIcon({
   iconAnchor: [11, 11],
 });
 
+const spotIcon = L.divIcon({
+  className: 'spot-icon',
+  html: '<div class="spot-dot"></div>',
+  // 40px hit zone around a small dot so pickup spots are easy to tap on a phone.
+  iconSize: [40, 40],
+  iconAnchor: [20, 20],
+});
+
+const youIcon = L.divIcon({
+  className: 'you-icon',
+  html: '<div class="you-dot"></div>',
+  iconSize: [24, 24],
+  iconAnchor: [12, 12],
+});
+
 // Re-exported Leaflet so consumers can customise if needed.
 export { L };
 
 // Markers: [{lat,lng,type:'driver'|'home'|'dest'}]
-// route: array of [lat,lng] points to draw a polyline (optional)
+// route: array of [lat,lng] points to draw a polyline (optional, single redrawn
+// when `routes` is provided). `routes` may also supply per-route colour/dash:
+//   [{ points: [[lat,lng],...], color: '#22c55e', dashed: true }]
 // center: [lat,lng], onMapClick: (latlng) => void, autofit: bool
 export default function Map({
   center = [-26.2155, 29.2916],
   zoom = 12,
   markers = [],
   route = null,
+  routes = null,
   onMapClick,
+  onSpotClick,
   className = '',
   autofit = true,
+  autofitSpots = false,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const layerRef = useRef(null);
-  const polyRef = useRef(null);
+  const polyRef = useRef([]);
   const markersRef = useRef([]);
   const circlesRef = useRef({});
   const fittedRef = useRef(false);
+  const prevAutofitRef = useRef(undefined);
+  const resizeObserverRef = useRef(null);
+  const spotClickRef = useRef(null);
+
+  useEffect(() => { spotClickRef.current = onSpotClick; }, [onSpotClick]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -65,11 +90,23 @@ export default function Map({
     layerRef.current = L.layerGroup().addTo(map);
     markersRef.current = [];
     fittedRef.current = false;
+
+    // The map can get mounted inside a hidden tab (display:none). Leaflet then
+    // initialises at 0x0 and stays blank when the tab is later shown. Watch the
+    // container and re-size whenever its dimensions actually change.
+    const ro = new ResizeObserver(() => {
+      if (mapRef.current) mapRef.current.invalidateSize();
+    });
+    ro.observe(containerRef.current);
+    resizeObserverRef.current = ro;
+
     return () => {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
-      polyRef.current = null;
+      polyRef.current = [];
       markersRef.current = [];
       circlesRef.current = {};
       fittedRef.current = false;
@@ -112,7 +149,34 @@ export default function Map({
         if (m.type === 'driver') icon = carIcon;
         else if (m.type === 'home') icon = homeIcon;
         else if (m.type === 'dest') icon = destIcon;
-        m.marker = L.marker([m.lat, m.lng], { icon }).addTo(layerRef.current);
+        else if (m.type === 'spot') icon = spotIcon;
+        else if (m.type === 'you') icon = youIcon;
+        m.marker = L.marker([m.lat, m.lng], {
+          icon,
+          title: m.title || m.name || '',
+          // Spots are always tappable (customers pick the closest); other pins
+          // become interactive only when they carry an annotation.
+          interactive: m.type === 'spot' || !!(m.title || m.name),
+          // A spot tap must only pick the spot — never also trigger the map's
+          // own click handler as the gesture bubbles up.
+          bubblingMouseEvents: false,
+        });
+        if (m.title || m.name) m.marker.bindTooltip(m.title || m.name, { direction: 'top', offset: [0, -10], opacity: 0.92 });
+        m.marker.addTo(layerRef.current);
+      }
+    });
+
+    // Pickup-spot pins are selectable — bind a click handler that stops the
+    // click from also reaching the map (so tapping a spot never drops a stray
+    // destination pin while the user is choosing).
+    next.forEach((m) => {
+      if (m.type !== 'spot') return;
+      m.marker.off('click');
+      if (spotClickRef.current) {
+        m.marker.on('click', (e) => {
+          L.DomEvent.stop(e);
+          spotClickRef.current(m.spot || m);
+        });
       }
     });
 
@@ -147,22 +211,29 @@ export default function Map({
 
     markersRef.current = next;
 
-    // Route polyline
-    if (polyRef.current) {
-      map.removeLayer(polyRef.current);
-      polyRef.current = null;
-    }
-    if (route && route.length >= 2) {
-      polyRef.current = L.polyline(route, { color: '#3b82f6', weight: 4, opacity: 0.75 }).addTo(map);
-    }
+    // Route polyline(s)
+    const lines = [];
+    if (routes && routes.length) lines.push(...routes.filter((r) => r && r.points && r.points.length >= 2));
+    else if (route && route.length >= 2) lines.push({ points: route, color: '#3b82f6' });
+    polyRef.current.forEach((p) => map.removeLayer(p));
+    polyRef.current = lines.map((r) => {
+      const opts = { color: r.color || '#3b82f6', weight: 4, opacity: 0.75 };
+      if (r.dashed) opts.dashArray = '8 10';
+      return L.polyline(r.points, opts).addTo(map);
+    });
+    const flatRoute = polyRef.current.flatMap((p) => p.getLatLngs());
+    const routePts = flatRoute.map((ll) => [ll.lat, ll.lng]);
 
     // Frame the view around the pins/route once there are at least two points so
     // the whole route is visible. A lone LIVE driver marker is tracked so the car
     // stays framed while it moves. We otherwise avoid jumping to a single static
     // pin (the caller's `center` prop keeps the initial view on the service area).
     if (autofit) {
-      const stable = next.filter((m) => m.type !== 'driver');
-      const pts = [...stable.map((m) => [m.lat, m.lng]), ...(route || [])];
+      // Spot pins (preset pickup locations) are scenery on the driver map and
+      // never drive the framing — unless the caller opts in (autofitSpots) so a
+      // customer can see all the pickup spots around them at once.
+      const stable = next.filter((m) => m.type !== 'driver' && (autofitSpots || m.type !== 'spot'));
+      const pts = [...stable.map((m) => [m.lat, m.lng]), ...routePts];
       if (pts.length >= 2) {
         const sig = pts.map((p) => p[0].toFixed(5) + ',' + p[1].toFixed(5)).sort().join('|');
         if (sig !== fittedRef.current) {
@@ -177,8 +248,14 @@ export default function Map({
           map.setView([d.lat, d.lng], Math.max(map.getZoom(), d.type === 'driver' ? 13 : 15), { animate: false });
         }
       }
+    } else if (prevAutofitRef.current === true) {
+      // Trip cleared while the map was framing a route — glide back to the
+      // caller's intended centre so we don't keep lingering elsewhere.
+      fittedRef.current = false;
+      map.setView(center, map.getZoom() > 15 ? 15 : map.getZoom(), { animate: true });
     }
-  }, [markers, route, autofit]);
+    prevAutofitRef.current = autofit;
+  }, [markers, route, routes, autofit, autofitSpots, center]);
 
   return <div ref={containerRef} className={`map ${className}`} />;
 }

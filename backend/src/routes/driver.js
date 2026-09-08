@@ -3,6 +3,7 @@ const repo = require('../db/repository');
 const { authRequired, ownerDriverOnly } = require('../middleware');
 const tripService = require('../services/trips');
 const payments = require('../services/payments');
+const pricing = require('../services/pricing');
 
 function driverRoutes({ notify }) {
   const router = Router();
@@ -39,6 +40,52 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
+  // Live navigation route (driver -> pickup, or any from/to pair).
+  router.post('/route', async (req, res, next) => {
+    try {
+      const { from, to } = req.body;
+      if (!from || !to || typeof from.lat !== 'number' || typeof to.lat !== 'number') {
+        return res.status(400).json({ error: 'from and to points are required' });
+      }
+      const route = await tripService.getRoute({ pickup: from, destination: to });
+      res.json(route);
+    } catch (e) { next(e); }
+  });
+
+  // Manage the service-area pickup spots (owner only, like all driver routes).
+  router.get('/spots', (_req, res) => {
+    res.json({ spots: repo.listPickupSpots() });
+  });
+
+  router.post('/spots', (req, res, next) => {
+    try {
+      const { name, category, address, lat, lng, note } = req.body;
+      if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
+        return res.status(400).json({ error: 'name and lat/lng are required' });
+      }
+      const spot = repo.createPickupSpot({ name, category, address, lat, lng, note });
+      res.json({ spot });
+    } catch (e) { next(e); }
+  });
+
+  router.put('/spots/:id', (req, res, next) => {
+    try {
+      const { name, category, address, lat, lng, note, sort } = req.body;
+      const spot = repo.updatePickupSpot(req.params.id, {
+        name, category, address, lat, lng, note, sort,
+      });
+      if (!spot) return res.status(404).json({ error: 'Spot not found' });
+      res.json({ spot });
+    } catch (e) { next(e); }
+  });
+
+  router.delete('/spots/:id', (req, res, next) => {
+    try {
+      repo.deletePickupSpot(req.params.id);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
   router.get('/me', (req, res) => {
     res.json(repo.getUserById(req.user.id));
   });
@@ -54,26 +101,62 @@ function driverRoutes({ notify }) {
     res.json({ trip: tripService.withCustomerInfo(repo.getLatestRequestedTrip() || null) });
   });
 
-  // Trip history.
-  router.get('/trips', (req, res) => {
-    res.json(repo.getTripsForDriver(req.user.id));
+  // Upcoming scheduled trips (customer pre-booked a time).
+  router.get('/scheduled-trips', (req, res) => {
+    const trips = repo.getScheduledTripsForDriver().map(tripService.withCustomerInfo);
+    res.json({ trips });
   });
 
-  // Earnings summary (today + all time, cash only in MVP).
+  // Start (activate) a scheduled trip -> moves it into the request flow.
+  router.post('/trips/:id/activate', (req, res, next) => {
+    try {
+      const trip = tripService.activateScheduledTrip(req.params.id);
+      notify.tripUpdated(trip);
+      notify.newTripToDriver(trip, req.user.id, {});
+      res.json({ trip });
+    } catch (e) { next(e); }
+  });
+
+  // Trip history.
+  router.get('/trips', (req, res) => {
+    const trips = repo.getTripsForDriver(req.user.id).map(tripService.withCustomerInfo);
+    res.json(trips);
+  });
+
+  // Earnings summary (today / this week / all time, cash only in MVP).
   router.get('/earnings', (req, res) => {
     const trips = repo.getTripsForDriver(req.user.id);
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const nowDate = new Date();
+    const todayIso = nowDate.toISOString().slice(0, 10);
     let todayTotal = 0;
+    let weekTotal = 0;
     let total = 0;
     let count = 0;
+    let weekCount = 0;
+    let tipsTotal = 0;
+    let ratingSum = 0;
+    let ratingCount = 0;
     for (const t of trips) {
-      if (t.status === 'completed' && t.finalFare != null) {
-        total += t.finalFare;
-        count += 1;
-        if ((t.timestamps.completed || '').slice(0, 10) === todayIso) todayTotal += t.finalFare;
-      }
+      if (t.status !== 'completed' || t.finalFare == null) continue;
+      total += t.finalFare;
+      count += 1;
+      tipsTotal += t.tipAmount || 0;
+      const completed = (t.timestamps.completed || '').slice(0, 10);
+      if (completed === todayIso) todayTotal += t.finalFare;
+      if (isThisWeek(completed)) { weekTotal += t.finalFare; weekCount += 1; }
+      if (t.rating != null) { ratingSum += t.rating; ratingCount += 1; }
     }
-    res.json({ today: todayTotal, total, completedTrips: count, currency: 'zar' });
+    res.json({
+      today: todayTotal,
+      week: weekTotal,
+      weeklyTrips: weekCount,
+      total,
+      completedTrips: count,
+      averageFare: count ? pricing.round(total / count) : 0,
+      tipsTotal,
+      averageRating: ratingCount ? Number((ratingSum / ratingCount).toFixed(2)) : null,
+      currency: 'zar',
+    });
   });
 
   // Accept trip request.
@@ -127,6 +210,30 @@ function driverRoutes({ notify }) {
   });
 
   return router;
+}
+
+// Whether an ISO date (YYYY-MM-DD) falls within the current week (Mon-Sun).
+function isThisWeek(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(`${dateStr}T00:00:00${localOffsetTz()}`);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  monday.setHours(0, 0, 0, 0);
+  const sundayEnd = new Date(monday);
+  sundayEnd.setDate(monday.getDate() + 6);
+  sundayEnd.setHours(23, 59, 59, 999);
+  return d >= monday && d <= sundayEnd;
+}
+
+function localOffsetTz() {
+  const o = -new Date().getTimezoneOffset();
+  const sign = o >= 0 ? '+' : '-';
+  const abs = Math.abs(o);
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0');
+  const mm = String(abs % 60).padStart(2, '0');
+  return `${sign}${hh}:${mm}`;
 }
 
 module.exports = driverRoutes;

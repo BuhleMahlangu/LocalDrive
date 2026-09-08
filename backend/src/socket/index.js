@@ -95,6 +95,15 @@ function initSocket(httpServer, corsOrigins) {
         data: { type: 'newTrip', tripId: trip.id },
       });
     },
+    scheduledTripAdded(trip, driverId) {
+      if (!trip || !driverId) return;
+      io.to(`user:${driverId}`).emit('trip:scheduled', { trip: serializeTrip(trip) });
+      push.sendToUser(driverId, {
+        title: 'Scheduled ride booked',
+        body: `Pre-booked: ${trip.pickup?.address || 'Pickup'} → ${trip.destination?.address || 'Destination'}`,
+        data: { type: 'scheduledTrip', tripId: trip.id },
+      });
+    },
     tripAccepted(trip) {
       if (!trip) return;
       io.to(`user:${trip.customerId}`).emit('trip:accepted', { trip: serializeTrip(trip) });

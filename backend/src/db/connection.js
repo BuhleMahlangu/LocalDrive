@@ -63,8 +63,10 @@ CREATE TABLE IF NOT EXISTS trips (
   payment_method TEXT NOT NULL DEFAULT 'cash',
   tip_amount     REAL NOT NULL DEFAULT 0,
   rating         INTEGER,
+  feedback_tags  TEXT,
   cancel_reason  TEXT,
   cancel_actor   TEXT,
+  scheduled_at   TEXT,
   requested_at   TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at    TEXT,
   started_at     TEXT,
@@ -111,6 +113,31 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (user_id, endpoint)
 );
+
+CREATE TABLE IF NOT EXISTS saved_places (
+  id        TEXT PRIMARY KEY,
+  user_id   TEXT NOT NULL,
+  label     TEXT NOT NULL,
+  kind      TEXT NOT NULL DEFAULT 'place',   -- 'home' | 'work' | 'place'
+  address   TEXT,
+  lat       REAL NOT NULL,
+  lng       REAL NOT NULL,
+  note      TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS pickup_spots (
+  id        TEXT PRIMARY KEY,
+  name      TEXT NOT NULL,
+  category  TEXT NOT NULL DEFAULT 'spot',
+  address   TEXT,
+  lat       REAL NOT NULL,
+  lng       REAL NOT NULL,
+  note      TEXT,
+  sort      INTEGER NOT NULL DEFAULT 0,
+  active    INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 db.exec(SCHEMA);
@@ -125,6 +152,27 @@ function ensureColumn(table, column, ddl) {
 ensureColumn('trips', 'payment_method', "TEXT NOT NULL DEFAULT 'cash'");
 ensureColumn('trips', 'pickup_note', 'TEXT');
 ensureColumn('trips', 'dest_note', 'TEXT');
+ensureColumn('trips', 'scheduled_at', 'TEXT');
+ensureColumn('trips', 'feedback_tags', 'TEXT');
 ensureColumn('payments', 'redirect_url', 'TEXT');
+
+// ---- Default pickup spots for the Kriel / Thubelihle service area ----
+// Insert-only (fixed IDs) so existing databases pick up the seed without
+// duplicating. Coordinates are approximate service-area landmarks; the owner
+// can adjust them or ask for a custom list.
+const SPOT_SEED = [
+  { id: 'spot_kriel_town', name: 'Kriel Town Centre', category: 'town', address: 'Main street, Kriel', lat: -26.2148, lng: 29.2913, sort: 1 },
+  { id: 'spot_kriel_rank', name: 'Kriel Taxi Rank', category: 'rank', address: 'Taxi rank, Kriel', lat: -26.2162, lng: 29.2922, sort: 2 },
+  { id: 'spot_kriel_mall', name: 'Kriel Mall', category: 'mall', address: 'Kriel', lat: -26.2125, lng: 29.2945, sort: 3 },
+  { id: 'spot_thub_clinic', name: 'Thubelihle Clinic', category: 'clinic', address: 'Thubelihle, Kriel', lat: -26.219, lng: 29.2495, sort: 4 },
+  { id: 'spot_thub_hall', name: 'Thubelihle Community Hall', category: 'hall', address: 'Thubelihle, Kriel', lat: -26.221, lng: 29.247, sort: 5 },
+  { id: 'spot_thub_fourways', name: 'Thubelihle Four Ways', category: 'landmark', address: 'Four-ways junction, Thubelihle', lat: -26.2172, lng: 29.252, sort: 6 },
+  { id: 'spot_thub_school', name: 'Thubelihle Primary School', category: 'school', address: 'Thubelihle, Kriel', lat: -26.2185, lng: 29.251, sort: 7 },
+  { id: 'spot_kriel_power', name: 'Kriel Power Station Gate', category: 'landmark', address: 'Kriel Power Station Road', lat: -26.2295, lng: 29.177, sort: 8 },
+];
+const seedSpots = db.prepare(
+  'INSERT OR IGNORE INTO pickup_spots (id, name, category, address, lat, lng, note, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+);
+for (const s of SPOT_SEED) seedSpots.run(s.id, s.name, s.category, s.address, s.lat, s.lng, s.note || null, s.sort);
 
 module.exports = db;

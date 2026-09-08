@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Map from '../../components/Map.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
+
+const FEEDBACK_TAGS = ['Friendly', 'Punctual', 'Clean car', 'Safe driving', 'Great music', 'Smooth ride', 'Helpful']; 
+
 export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [trip, setTrip] = useState(initial);
   const [driver, setDriver] = useState(null);
@@ -8,6 +11,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [route, setRoute] = useState(null);
   const [stars, setStars] = useState(0);
   const [tip, setTip] = useState(0);
+  const [fbtags, setFbTags] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [payment, setPayment] = useState(null);
@@ -17,9 +21,6 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   useEffect(() => {
     api('/customer/driver').then(setDriver).catch(() => {});
     api('/customer/trips/active').then((r) => r.trip && setTrip(r.trip)).catch(() => {});
-    if (initial?.id) {
-      api(`/customer/trips/${initial.id}`).catch(() => {});
-    }
 
     const socket = connectSocket();
     socketRef.current = socket;
@@ -59,7 +60,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     if (!trip || stars < 1) return;
     setBusy(true);
     setError('');
-    api(`/customer/trips/${trip.id}/rate`, { method: 'POST', body: { stars, tipAmount: tip } })
+    api(`/customer/trips/${trip.id}/rate`, { method: 'POST', body: { stars, tipAmount: tip, feedbackTags: fbtags } })
       .then((res) => setTrip(res.trip))
       .catch((err) => setError(err.message))
       .finally(() => setBusy(false));
@@ -174,6 +175,21 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
                   ))}
                 </div>
                 <div className="field">
+                  <span className="field-label">How was the ride? (optional)</span>
+                  <div className="fb-tags">
+                    {FEEDBACK_TAGS.map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`fb-tag ${fbtags.includes(t) ? 'on' : ''}`}
+                        onClick={() => setFbTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]))}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
                   <span className="field-label">Add a tip</span>
                   <div className="tips-row">
                     {[0,10,20,50].map((v) => (
@@ -188,6 +204,9 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
             ) : (
               <div className="done-box">
                 <p>Thanks! You rated {trip.rating}★</p>
+                {trip.feedbackTags?.length > 0 && (
+                  <p className="hint">📝 {trip.feedbackTags.join(' · ')}</p>
+                )}
                 <button className="btn primary" onClick={onNewBooking}>Book another ride</button>
                 <button className="link-btn" onClick={onExit}>Back to home</button>
               </div>

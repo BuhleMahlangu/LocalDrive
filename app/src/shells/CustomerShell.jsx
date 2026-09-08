@@ -3,6 +3,7 @@ import Home from '../screens/customer/Home.jsx';
 import Book from '../screens/customer/Book.jsx';
 import ActiveTrip from '../screens/customer/ActiveTrip.jsx';
 import History from '../screens/customer/History.jsx';
+import ThemeToggle from '../components/ThemeToggle.jsx';
 import { isDriverUser } from '../api.js';
 
 export default function CustomerShell({ user, onLogout, onSwitchRole }) {
@@ -14,6 +15,13 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
   const canBeDriver = isDriverUser(user);
 
   function openActive(trip) {
+    // Scheduled rides aren't live yet — return home so the "Upcoming" card shows.
+    if (trip && trip.status === 'scheduled') {
+      setActiveTrip(null);
+      setRebookDest(null);
+      setView('home');
+      return;
+    }
     setActiveTrip(trip);
     setView('active');
   }
@@ -43,6 +51,7 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
         {canBeDriver && (
           <button className="chip-btn" onClick={() => onSwitchRole('driver')} title="Open driver dashboard">🚗 Driver mode</button>
         )}
+        <ThemeToggle />
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
 
@@ -51,6 +60,11 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
           user={user}
           onBook={() => { setRebookDest(null); setView('book'); }}
           onResume={() => setView('active')}
+          onRebook={(trip) => { setRebookDest(trip ? trip.destination : null); setView('book'); }}
+          onPickPlace={(place) => {
+            setRebookDest({ lat: place.lat, lng: place.lng, address: place.address || place.label, note: place.note });
+            setView('book');
+          }}
         />
       </div>
 

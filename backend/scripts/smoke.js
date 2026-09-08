@@ -29,6 +29,10 @@ async function login(phone, role, name, email) {
 async function main() {
   console.log('== DriveLocal smoke test ==');
 
+  console.log('\n[0] Public pickup spots');
+  const spots = await api('GET', '/api/pickup-spots');
+  assert(spots.status === 200 && Array.isArray(spots.json.spots) && spots.json.spots.length > 0, 'pickup spots listed');
+
   console.log('\n[1] Driver goes online');
   const driver = await login('+27000000000', 'driver', 'Thabo', 'd@x.za');
   assert(driver.status === 200 && driver.json.user.role === 'driver', 'driver OTP verify');
@@ -39,6 +43,19 @@ async function main() {
 
   const loc = await api('POST', '/api/driver/location', { lat: -26.2041, lng: 28.0473, heading: 90, accuracy: 12 }, driverToken);
   assert(loc.status === 200 && loc.json.lat === -26.2041, 'driver location set');
+
+  const route = await api('POST', '/api/driver/route', { from: { lat: -26.2041, lng: 28.0473 }, to: { lat: -26.2155, lng: 29.2916 } }, driverToken);
+  assert(route.status === 200 && typeof route.json.distanceKm === 'number', 'driver navigation route computed');
+
+  console.log('\n[2] Pickup spot management');
+  const made = await api('POST', '/api/driver/spots', { name: 'Smoke Spot', lat: -26.21, lng: 29.28 }, driverToken);
+  assert(made.status === 200 && made.json.spot.id, 'pickup spot created');
+  const moved = await api('PUT', `/api/driver/spots/${made.json.spot.id}`, { lat: -26.22, lng: 29.29 }, driverToken);
+  assert(moved.status === 200 && Math.abs(moved.json.spot.lat - -26.22) < 1e-6, 'pickup spot moved');
+  const renamed = await api('PUT', `/api/driver/spots/${made.json.spot.id}`, { name: 'Smoke Spot Renamed' }, driverToken);
+  assert(renamed.status === 200 && renamed.json.spot.name === 'Smoke Spot Renamed', 'pickup spot renamed');
+  const removed = await api('DELETE', `/api/driver/spots/${made.json.spot.id}`, null, driverToken);
+  assert(removed.status === 200, 'pickup spot deleted');
 
   console.log('\n[2] Customer availability + estimate');
   const avail = await api('GET', '/api/customer/driver/availability');
@@ -58,6 +75,7 @@ async function main() {
   const book = await api('POST', '/api/customer/trips', {
     pickup: { lat: -26.2041, lng: 28.0473, address: 'Joburg CBD' },
     destination: { lat: -26.1076, lng: 28.0567, address: 'Sandton' },
+    paymentMethod: 'cash',
   }, custToken);
   assert(book.status === 201 && book.json.trip.status === 'requested', 'trip created (requested)');
   const tripId = book.json.trip.id;
@@ -81,7 +99,7 @@ async function main() {
     actualDistanceKm: 14.5, actualDurationMin: 28, tipAmount: 0,
   }, driverToken);
   assert(complete.json.trip.status === 'completed', 'trip completed');
-  assert(complete.json.payment && complete.json.payment.status === 'pending', 'payment pending (cash)');
+  assert(complete.json.payment && complete.json.payment.status === 'succeeded', 'cash payment settled');
   console.log(`  final fare=R${complete.json.trip.finalFare}`);
 
   console.log('\n[7] Customer rates + tips');
@@ -92,6 +110,7 @@ async function main() {
   console.log('\n[8] Driver earnings');
   const earn = await api('GET', '/api/driver/earnings', null, driverToken);
   assert(earn.json.completedTrips >= 1 && earn.json.total > 0, `earnings total R${earn.json.total}`);
+  assert(earn.json.weeklyTrips === earn.json.completedTrips, 'weekly trips counted');
 
   console.log('\n[9] Customer history + re-check availability after offline');
   const history = await api('GET', '/api/customer/trips', null, custToken);
@@ -106,8 +125,50 @@ async function main() {
   const book2 = await api('POST', '/api/customer/trips', {
     pickup: { lat: -25.7461, lng: 28.1881, address: 'Pretoria' },
     destination: { lat: -25.7461, lng: 28.25, address: 'Centurion' },
+    paymentMethod: 'cash',
   }, cust2.json.token);
   assert(book2.status === 409 && book2.json.code === 'DRIVER_OFFLINE', 'offline booking rejected');
+
+  console.log('\n[11] Saved places + scheduled trip (new features)');
+  const p1 = await api('POST', '/api/customer/places', { label: 'Home', kind: 'home', address: 'Thubelihle, Kriel', lat: -26.2155, lng: 29.2916 }, cust2.json.token);
+  assert(p1.status === 201 && p1.json.kind === 'home', 'save place (home)');
+  const p2 = await api('POST', '/api/customer/places', { label: 'Work', kind: 'work', address: 'Kriel Power Station', lat: -26.2, lng: 29.3 }, cust2.json.token);
+  assert(p2.status === 201, 'save place (work)');
+  const places = await api('GET', '/api/customer/places', null, cust2.json.token);
+  assert(places.json.length === 2 && places.json[0].kind === 'home', 'places listed homes first');
+  const del = await api('DELETE', `/api/customer/places/${p2.json.id}`, null, cust2.json.token);
+  assert(del.json.ok === true, 'place deleted');
+
+  // Even with the driver offline, a future scheduled trip can be booked.
+  const sched = await api('POST', '/api/customer/trips', {
+    pickup: { lat: -26.2041, lng: 28.0473, address: 'Joburg CBD' },
+    destination: { lat: -26.1076, lng: 28.0567, address: 'Sandton' },
+    paymentMethod: 'cash',
+    scheduledAt: '2099-01-01T08:00:00Z',
+  }, cust2.json.token);
+  assert(sched.status === 201 && sched.json.trip.status === 'scheduled', 'scheduled trip created while offline');
+  const upcoming = await api('GET', '/api/customer/trips/upcoming', null, cust2.json.token);
+  assert(upcoming.json.trips.some((t) => t.id === sched.json.trip.id), 'scheduled trip in upcoming list');
+  const schedId = sched.json.trip.id;
+
+  await api('POST', '/api/driver/online', { isOnline: true }, driverToken);
+  const schedList = await api('GET', '/api/driver/scheduled-trips', null, driverToken);
+  assert(schedList.json.trips.some((t) => t.id === schedId), 'driver sees scheduled trip');
+  const act = await api('POST', `/api/driver/trips/${schedId}/activate`, {}, driverToken);
+  assert(act.status === 200 && act.json.trip.status === 'requested', 'driver activated scheduled trip');
+
+  // A second scheduled ride can be cancelled by the customer before activation.
+  const sched2 = await api('POST', '/api/customer/trips', {
+    pickup: { lat: -26.2041, lng: 28.0473, address: 'Joburg CBD' },
+    destination: { lat: -26.1076, lng: 28.0567, address: 'Sandton' },
+    paymentMethod: 'cash',
+    scheduledAt: '2099-03-01T08:00:00Z',
+  }, cust2.json.token);
+  assert(sched2.status === 201 && sched2.json.trip.status === 'scheduled', 'second scheduled trip created');
+  const cancelled = await api('POST', `/api/customer/trips/${sched2.json.trip.id}/cancel`, { reason: 'Changed my mind' }, cust2.json.token);
+  assert(cancelled.status === 200 && cancelled.json.trip.status === 'cancelled', 'scheduled ride cancelled by customer');
+  const schedList2 = await api('GET', '/api/driver/scheduled-trips', null, driverToken);
+  assert(!schedList2.json.trips.some((t) => t.id === sched2.json.trip.id), 'cancelled ride left the driver list');
 
   console.log('\nAll smoke tests passed.');
 }

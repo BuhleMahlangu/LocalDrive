@@ -11,6 +11,12 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  function handlePhone(e) {
+    // Friendly live formatting for SA numbers as they type (keeps the raw input clean).
+    const raw = e.target.value.replace(/[^\d+]/g, '');
+    setPhone(raw);
+  }
+
   async function requestCode(e) {
     e.preventDefault();
     setError('');
@@ -59,7 +65,7 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
           <h2>{isDriver ? 'Driver login' : 'Log in with your phone'}</h2>
           <label>
             Phone number
-            <input type="tel" inputMode="tel" placeholder="+27 82 000 0000" value={phone} onChange={(e) => setPhone(e.target.value)} required autoFocus />
+            <input type="tel" inputMode="tel" placeholder="+27 82 000 0000" value={phone} onChange={handlePhone} required autoFocus />
           </label>
           {error && <p className="error">{error}</p>}
           <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? 'Sending…' : 'Request code'}</button>

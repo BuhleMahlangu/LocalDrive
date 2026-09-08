@@ -7,6 +7,7 @@ const driverRoutesFactory = require('./routes/driver');
 const customerRoutesFactory = require('./routes/customer');
 const paymentsRoutes = require('./routes/payments');
 const pushRoutes = require('./routes/push');
+const spotsRoutes = require('./routes/spots');
 const { initSocket } = require('./socket');
 const { notFound, errorHandler } = require('./middleware');
 
@@ -43,6 +44,7 @@ app.get('/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/push', pushRoutes);
 app.use('/api/payments', paymentsRoutes);
+app.use('/api/pickup-spots', spotsRoutes());
 
 const server = http.createServer(app);
 const { io, notify } = initSocket(server, config.corsOrigins);

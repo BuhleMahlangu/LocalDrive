@@ -62,17 +62,23 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 - Real-time driver tracking, route line, live ZAR fare estimate
 - Call / WhatsApp the driver during a trip
 - **Cash or Card** (Yoco hosted checkout) payment choice at booking — the Card option hides automatically until Yoco is configured
-- Receipts, ride history, one-tap rebook of a previous route
-- Star rating + optional tip after each ride
+- Transparent **fare breakdown** (base + distance + time) before booking
+- **Schedule a ride** for a future time — book now, ride later, or cancel it anytime before the driver starts it
+- **Saved places** (Home / Work / Taxi rank / School) for one-tap booking
+- **Preset pickup spots** for the Kriel/Thubelihle area — seeded on the server, shown as pins on the driver's map and as one-tap options in the customer's Book screen (no GPS permission needed)
+- Receipts, ride history, one-tap rebook of a previous route, **share receipt** via WhatsApp
+- Star rating + optional tip + quick **feedback tags** after each ride
 - **Web push** notifications (trip accepted / driver on the way)
+- **Dark mode** toggle + installable PWA, works offline
 
 **Driver (you)**
 - Go online/offline toggle (broadcasts GPS live)
 - Incoming request card with pickup/destination notes + **10-second auto-decline** countdown, with Call/WhatsApp and map-navigate shortcuts
-- **Web push** notifications for new booking requests
+- **Upcoming scheduled rides** card — start pre-booked trips with one tap
+- **Web push** notifications for new booking requests (and scheduled-trip activation)
 - Active trip flow: Start → Complete, with customer call/WhatsApp
-- Earnings dashboard (today / total / trips)
-- Full trip history with fares, tips and ratings
+- Earnings dashboard: **take-home this week**, today's fares, avg fare, tips, avg rating, ride counts
+- Full trip history with fares, tips and ratings, and which customer each ride was for
 - Profile editor: vehicle, license plate, service radius, base fare, per-km, per-min rates
 
 ## Environment configuration
@@ -101,7 +107,7 @@ cd backend
 npm run seed        # create/update demo accounts + driver
 npm test            # unit tests (node --test, in-memory DB)
 npm run lint        # ESLint (also: cd app && npm run lint)
-npm run smoke       # end-to-end API test (server must be running first)
+npm run smoke       # end-to-end API test (server must be running first; run in dev mode for OTP 123456)
 npm run backup      # SQLite online backup -> backend/backups (keeps last 14)
 
 cd app

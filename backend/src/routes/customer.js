@@ -40,17 +40,49 @@ function customerRoutes({ notify }) {
 
   router.use(authRequired(['customer']));
 
+  // Saved places (frequent home / work / other spots for quick booking).
+  router.get('/places', (req, res) => {
+    res.json(repo.listSavedPlaces(req.user.id));
+  });
+
+  router.post('/places', (req, res, next) => {
+    try {
+      const { label, kind, address, lat, lng, note } = req.body;
+      if (label == null || typeof lat !== 'number' || typeof lng !== 'number') {
+        return res.status(400).json({ error: 'label, lat and lng are required' });
+      }
+      const place = repo.createSavedPlace(req.user.id, { label, kind, address, lat, lng, note });
+      res.status(201).json(place);
+    } catch (e) { next(e); }
+  });
+
+  router.put('/places/:id', (req, res, next) => {
+    try {
+      const { label, kind, address, lat, lng, note } = req.body;
+      const place = repo.updateSavedPlace(req.params.id, req.user.id, { label, kind, address, lat, lng, note });
+      if (!place) return res.status(404).json({ error: 'Place not found' });
+      res.json(place);
+    } catch (e) { next(e); }
+  });
+
+  router.delete('/places/:id', (req, res, next) => {
+    try {
+      repo.deleteSavedPlace(req.params.id, req.user.id);
+      res.json({ ok: true });
+    } catch (e) { next(e); }
+  });
+
   // Create a booking (trip request).
   router.post('/trips', async (req, res, next) => {
     try {
-      const { pickup, destination, priceModel, paymentMethod } = req.body;
+      const { pickup, destination, priceModel, paymentMethod, scheduledAt } = req.body;
       if (paymentMethod !== 'cash' && paymentMethod !== 'card') {
         return res.status(400).json({ error: 'Invalid payment method' });
       }
       if (paymentMethod === 'card' && !config.yoco.secretKey) {
         return res.status(400).json({ error: 'Card payments are not available yet. Please choose cash.' });
       }
-      const avail = tripService.checkAvailabilityForPickup(pickup);
+      const avail = tripService.checkAvailabilityForPickup(pickup, scheduledAt);
       if (!avail.ok) {
         return res.status(409).json({
           error: avail.code === 'OUT_OF_RANGE'
@@ -63,11 +95,18 @@ function customerRoutes({ notify }) {
         customerId: req.user.id,
         pickup, destination, priceModel,
         paymentMethod,
+        scheduledAt: scheduledAt || null,
       });
 
-      // Push the request to the single driver.
-      const driver = repo.getDriver();
-      if (driver) notify.newTripToDriver(trip, driver.id, driverPublic);
+      // Push the request to the single driver (only for immediate trips;
+      // scheduled trips are surfaced in the driver's Upcoming list instead).
+      if (!trip.scheduledAt) {
+        const driver = repo.getDriver();
+        if (driver) notify.newTripToDriver(trip, driver.id, driverPublic);
+      } else {
+        const driver = repo.getDriver();
+        if (driver) notify.scheduledTripAdded(trip, driver.id);
+      }
 
       res.status(201).json({ trip, estimate, driver: driverPublic });
     } catch (e) { next(e); }
@@ -84,6 +123,13 @@ function customerRoutes({ notify }) {
     res.json({ trip });
   });
 
+  // My upcoming scheduled trips (pre-booked for a future time).
+  router.get('/trips/upcoming', (req, res) => {
+    const trips = repo.getTripsForCustomer(req.user.id)
+      .filter((t) => t.status === 'scheduled');
+    res.json({ trips });
+  });
+
   // Cancel my booking.
   router.post('/trips/:id/cancel', async (req, res, next) => {
     try {
@@ -96,8 +142,8 @@ function customerRoutes({ notify }) {
   // Rate + tip a completed trip.
   router.post('/trips/:id/rate', async (req, res, next) => {
     try {
-      const { stars, tipAmount } = req.body;
-      const trip = await tripService.rateTrip(req.params.id, req.user.id, stars, tipAmount);
+      const { stars, tipAmount, feedbackTags } = req.body;
+      const trip = await tripService.rateTrip(req.params.id, req.user.id, stars, tipAmount, feedbackTags);
       notify.tripUpdated(trip);
       res.json({ trip });
     } catch (e) { next(e); }

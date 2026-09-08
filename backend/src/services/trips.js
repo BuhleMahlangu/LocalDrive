@@ -29,7 +29,7 @@ async function getRoute({ pickup, destination }) {
   return { distanceKm, durationMin: Math.max(2, distanceKm * 2 + 5), polyline: null };
 }
 
-async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash' }) {
+async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null }) {
   const driver = repo.getDriver();
   const customer = repo.getUserById(customerId);
   if (!driver || !customer) {
@@ -38,8 +38,11 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     throw err;
   }
 
-  // Driver must be online to accept new bookings at all.
-  if (!driver.isOnline) {
+  const isScheduled = !!scheduledAt;
+
+  // Driver must be online to accept new *immediate* bookings. Scheduled trips
+  // are queued for later, so we don't require the driver to be online now.
+  if (!isScheduled && !driver.isOnline) {
     const err = new Error('Driver unavailable, try again later');
     err.status = 409;
     err.code = 'DRIVER_OFFLINE';
@@ -58,7 +61,8 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
   const trip = repo.createTrip({
     id: uid('trip'),
     customerId,
-    status: 'requested',
+    status: isScheduled ? 'scheduled' : 'requested',
+    scheduledAt: isScheduled ? scheduledAt : null,
     pickup,
     destination,
     routePolyline: route.polyline,
@@ -72,10 +76,24 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
   return { trip, estimate, driverPublic: publicDriver(driver) };
 }
 
+// Move a scheduled trip into the live request flow so the driver can accept it.
+function activateScheduledTrip(tripId) {
+  const trip = repo.getTripById(tripId);
+  if (!trip || trip.status !== 'scheduled') {
+    const err = new Error('Trip is no longer scheduled');
+    err.status = 409;
+    throw err;
+  }
+  return repo.updateTrip(tripId, { status: 'requested' });
+}
+
 // Check geofencing before dispatch: driver must be online + within (service radius + pickup distance).
-function checkAvailabilityForPickup(pickup) {
+function checkAvailabilityForPickup(pickup, scheduledAt) {
   const driver = repo.getDriver();
-  if (!driver || !driver.isOnline) return { ok: false, code: 'DRIVER_OFFLINE' };
+  // Scheduled trips are queued for later, so the driver doesn't need to be
+  // online right now — only the geofence matters.
+  if (!driver) return { ok: false, code: 'NO_DRIVER' };
+  if (!scheduledAt && !driver.isOnline) return { ok: false, code: 'DRIVER_OFFLINE' };
   const loc = repo.getDriverLocation(driver.id);
   if (!loc) return { ok: true, code: null }; // no location yet; allow booking, driver handles it
   const { ok, distKm } = isWithinService(
@@ -184,7 +202,7 @@ async function cancelTrip(tripId, actor, reason) {
     err.status = 404;
     throw err;
   }
-  const cancellable = ['requested', 'accepted'];
+  const cancellable = ['requested', 'accepted', 'scheduled'];
   if (!cancellable.includes(trip.status)) {
     const err = new Error('This trip cannot be cancelled');
     err.status = 409;
@@ -198,7 +216,7 @@ async function cancelTrip(tripId, actor, reason) {
   });
 }
 
-async function rateTrip(tripId, customerId, stars, tipAmount) {
+async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
   const trip = repo.getTripById(tripId);
   if (!trip || trip.customerId !== customerId || trip.status !== 'completed') {
     const err = new Error('Cannot rate this trip');
@@ -213,6 +231,10 @@ async function rateTrip(tripId, customerId, stars, tipAmount) {
     }
     repo.updateTrip(tripId, { rating: stars });
     if (trip.driverId) repo.addRating(trip.driverId, stars);
+  }
+  if (Array.isArray(feedbackTags) && feedbackTags.length) {
+    const clean = feedbackTags.slice(0, 8).map((t) => String(t).trim()).filter(Boolean).slice(0, 8);
+    repo.updateTrip(tripId, { feedback_tags: clean.join(',') });
   }
   if (tipAmount != null) {
     const driver = repo.getDriver();
@@ -285,6 +307,7 @@ module.exports = {
   completeTrip,
   cancelTrip,
   rateTrip,
+  activateScheduledTrip,
   publicDriver,
   withCustomerInfo,
   withDriverInfo,

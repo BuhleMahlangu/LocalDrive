@@ -53,8 +53,10 @@ function mapTrip(row) {
     paymentMethod: row.payment_method,
     tipAmount: row.tip_amount,
     rating: row.rating,
+    feedbackTags: row.feedback_tags ? String(row.feedback_tags).split(',').filter(Boolean) : [],
     cancelReason: row.cancel_reason,
     cancelActor: row.cancel_actor,
+    scheduledAt: row.scheduled_at,
     timestamps: {
       requested: row.requested_at,
       accepted: row.accepted_at,
@@ -83,6 +85,35 @@ function mapPayment(row) {
   };
 }
 
+function mapPlace(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    label: row.label,
+    kind: row.kind,
+    address: row.address,
+    lat: row.lat,
+    lng: row.lng,
+    note: row.note,
+    createdAt: row.created_at,
+  };
+}
+
+function mapSpot(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    category: row.category,
+    address: row.address,
+    lat: row.lat,
+    lng: row.lng,
+    note: row.note,
+    sort: row.sort,
+    createdAt: row.created_at,
+  };
+}
+
 module.exports = {
   db,
   uid,
@@ -90,6 +121,7 @@ module.exports = {
   mapUser,
   mapTrip,
   mapPayment,
+  mapSpot,
 
   // ---------- Users ----------
   createUser({ phone, name, email, role }) {
@@ -222,8 +254,8 @@ module.exports = {
       `INSERT INTO trips
        (id, customer_id, driver_id, status, pickup_address, pickup_lat, pickup_lng,
         pickup_note, dest_address, dest_lat, dest_lng, dest_note, route_polyline,
-        distance_km, duration_min, fare_estimate, price_model, payment_method)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        distance_km, duration_min, fare_estimate, price_model, payment_method, scheduled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id, data.customerId, data.driverId || null, data.status || 'requested',
       data.pickup?.address, data.pickup?.lat, data.pickup?.lng,
@@ -232,7 +264,7 @@ module.exports = {
       data.destination?.note || null,
       data.routePolyline || null, data.distanceKm || null, data.durationMin || null,
       data.fareEstimate ?? null, data.priceModel || 'distance_time',
-      data.paymentMethod || 'cash',
+      data.paymentMethod || 'cash', data.scheduledAt || null,
     );
     return this.getTripById(id);
   },
@@ -277,8 +309,8 @@ module.exports = {
 
   updateTrip(id, fields) {
     const allowed = ['driver_id', 'status', 'route_polyline', 'distance_km', 'duration_min',
-      'fare_estimate', 'final_fare', 'payment_method', 'tip_amount', 'rating', 'cancel_reason', 'cancel_actor',
-      'accepted_at', 'started_at', 'completed_at', 'cancelled_at'];
+      'fare_estimate', 'final_fare', 'payment_method', 'tip_amount', 'rating', 'feedback_tags', 'cancel_reason', 'cancel_actor',
+      'accepted_at', 'started_at', 'completed_at', 'cancelled_at', 'scheduled_at'];
     const updates = [];
     const vals = [];
     for (const [key, value] of Object.entries(fields)) {
@@ -373,5 +405,95 @@ module.exports = {
 
   removePushSubscription(endpoint) {
     db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+  },
+
+  // ---------- Saved places ----------
+  listSavedPlaces(userId) {
+    return db.prepare(
+      `SELECT * FROM saved_places WHERE user_id = ?
+       ORDER BY CASE kind WHEN 'home' THEN 0 WHEN 'work' THEN 1 ELSE 2 END ASC,
+       created_at ASC`,
+    ).all(userId).map(mapPlace);
+  },
+
+  createSavedPlace(userId, { label, kind, address, lat, lng, note }) {
+    const id = uid('place');
+    db.prepare(
+      'INSERT INTO saved_places (id, user_id, label, kind, address, lat, lng, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, userId, label, kind || 'place', address || null, lat, lng, note || null);
+    return this.getSavedPlaceById(id);
+  },
+
+  getSavedPlaceById(id) {
+    return mapPlace(db.prepare('SELECT * FROM saved_places WHERE id = ?').get(id));
+  },
+
+  updateSavedPlace(id, userId, fields) {
+    const allowed = ['label', 'kind', 'address', 'lat', 'lng', 'note'];
+    const updates = [];
+    const vals = [];
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && allowed.includes(key)) {
+        updates.push(`${key} = ?`);
+        vals.push(value);
+      }
+    }
+    if (updates.length) {
+      db.prepare(`UPDATE saved_places SET ${updates.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals, id, userId);
+    }
+    return this.getSavedPlaceById(id);
+  },
+
+  deleteSavedPlace(id, userId) {
+    db.prepare('DELETE FROM saved_places WHERE id = ? AND user_id = ?').run(id, userId);
+  },
+
+  // ---------- Pickup spots ----------
+  listPickupSpots(limit = 50) {
+    return db.prepare(
+      'SELECT * FROM pickup_spots WHERE active = 1 ORDER BY sort ASC, name ASC LIMIT ?',
+    ).all(limit).map(mapSpot);
+  },
+
+  getPickupSpotById(id) {
+    return mapSpot(db.prepare('SELECT * FROM pickup_spots WHERE id = ?').get(id));
+  },
+
+  createPickupSpot({ name, category, address, lat, lng, note, sort }) {
+    const id = uid('spot');
+    const maxSort = db.prepare('SELECT COALESCE(MAX(sort), 0) AS m FROM pickup_spots').get().m;
+    db.prepare(
+      'INSERT INTO pickup_spots (id, name, category, address, lat, lng, note, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, name, category || 'spot', address || null, lat, lng, note || null, sort ?? maxSort + 1);
+    return this.getPickupSpotById(id);
+  },
+
+  updatePickupSpot(id, fields) {
+    const allowed = ['name', 'category', 'address', 'lat', 'lng', 'note', 'sort', 'active'];
+    const updates = [];
+    const vals = [];
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && allowed.includes(key)) {
+        updates.push(`${key} = ?`);
+        vals.push(value);
+      }
+    }
+    if (updates.length) {
+      db.prepare(`UPDATE pickup_spots SET ${updates.join(', ')} WHERE id = ?`).run(...vals, id);
+    }
+    return this.getPickupSpotById(id);
+  },
+
+  deletePickupSpot(id) {
+    db.prepare('DELETE FROM pickup_spots WHERE id = ?').run(id);
+  },
+
+  // ---------- Upcoming scheduled trips ----------
+  getScheduledTripsForDriver(limit = 20) {
+    return db.prepare(
+      `SELECT * FROM trips
+       WHERE status = 'scheduled' AND (scheduled_at IS NULL OR scheduled_at >= datetime('now', '-1 hour'))
+       ORDER BY COALESCE(scheduled_at, requested_at) ASC LIMIT ?`,
+    ).all(limit).map(mapTrip);
   },
 };

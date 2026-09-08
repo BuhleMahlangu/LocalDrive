@@ -62,8 +62,10 @@ CREATE TABLE IF NOT EXISTS trips (
   payment_method TEXT NOT NULL DEFAULT 'cash',
   tip_amount     NUMERIC NOT NULL DEFAULT 0,
   rating         INTEGER,
+  feedback_tags  TEXT,
   cancel_reason  TEXT,
   cancel_actor   TEXT,          -- 'customer' | 'driver' | 'system'
+  scheduled_at   TIMESTAMPTZ,
   requested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   accepted_at    TIMESTAMPTZ,
   started_at     TIMESTAMPTZ,
@@ -118,3 +120,17 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (user_id, endpoint)
 );
+
+-- Saved places (frequent pickups/destinations) per customer
+CREATE TABLE IF NOT EXISTS saved_places (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  label      TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'place',   -- 'home' | 'work' | 'place'
+  address    TEXT,
+  lat        DOUBLE PRECISION NOT NULL,
+  lng        DOUBLE PRECISION NOT NULL,
+  note       TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id);

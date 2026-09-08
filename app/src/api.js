@@ -65,6 +65,29 @@ export function toTel(phone) {
   return `tel:${(phone || '').replace(/[^\d+]/g, '')}`;
 }
 
+const THEME_KEY = 'drivelocal_theme';
+
+export function currentTheme() {
+  return localStorage.getItem(THEME_KEY) || 'light';
+}
+
+// Apply the saved theme to <html> (called at startup and on toggle).
+export function applyTheme() {
+  const t = localStorage.getItem(THEME_KEY);
+  applyThemeValue(t === 'dark' ? 'dark' : 'light');
+}
+
+function applyThemeValue(v) {
+  document.documentElement.setAttribute('data-theme', v);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', v === 'dark' ? '#0f1420' : '#1a1a2e');
+  localStorage.setItem(THEME_KEY, v);
+}
+
+export function setTheme(v) {
+  applyThemeValue(v === 'dark' ? 'dark' : 'light');
+}
+
 export function toWhatsApp(phone, text) {
   const num = String(phone || '').replace(/[^\d]/g, '');
   const msg = text ? encodeURIComponent(text) : '';

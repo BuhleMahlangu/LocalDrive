@@ -34,6 +34,10 @@ export default function Trips() {
               <span className="subtitle">{formatRand(t.finalFare ?? t.fareEstimate)}</span>
               {t.rating != null && <span className="stars">★ {t.rating}</span>}
             </div>
+            {t.customerName && <p className="hint">Customer: {t.customerName} {t.customerPhone ? `· ${t.customerPhone}` : ''}</p>}
+            {t.feedbackTags?.length > 0 && (
+              <p className="hint">📝 {t.feedbackTags.join(' · ')}</p>
+            )}
             {t.tipAmount > 0 && <p className="hint">Tip: {formatRand(t.tipAmount)}</p>}
             <p className="hint">{timeLabel(t.timestamps?.requested)}</p>
           </div>

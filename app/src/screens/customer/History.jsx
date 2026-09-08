@@ -50,17 +50,22 @@ export default function History({ onBack, onRebook }) {
               )}
             </div>
 
-            {expanded === t.id && (
-              <div className="receipt">
-                <h3>Receipt</h3>
-                <div className="receipt-row"><span>Base fare</span><span>{formatRand(estimatePart(t, 'subtotal'))}</span></div>
-                <div className="receipt-row"><span>Distance</span><span>{t.distanceKm ?? 0} km</span></div>
-                <div className="receipt-row"><span>Duration</span><span>{t.durationMin ?? 0} min</span></div>
-                {t.tipAmount > 0 && <div className="receipt-row"><span>Tip</span><span>{formatRand(t.tipAmount)}</span></div>}
-                <div className="receipt-row total"><span>Total</span><span>{formatRand(t.finalFare ?? t.fareEstimate)}</span></div>
-                <p className="hint">Trip {t.id} · {timeLabel(t.timestamps?.completed)}</p>
-              </div>
-            )}
+            {expanded === t.id && (() => {
+              const total = t.finalFare ?? t.fareEstimate ?? 0;
+              const fareNoTip = Math.max(0, total - (t.tipAmount || 0));
+              return (
+                <div className="receipt">
+                  <h3>Receipt</h3>
+                  <div className="receipt-row"><span>Fare</span><span>{formatRand(fareNoTip)}</span></div>
+                  <div className="receipt-row"><span>Distance</span><span>{t.distanceKm ?? 0} km</span></div>
+                  <div className="receipt-row"><span>Duration</span><span>{t.durationMin ?? 0} min</span></div>
+                  {t.tipAmount > 0 && <div className="receipt-row"><span>Tip</span><span>{formatRand(t.tipAmount)}</span></div>}
+                  <div className="receipt-row total"><span>Total</span><span>{formatRand(total)}</span></div>
+                  <p className="hint">Trip {t.id} · {timeLabel(t.timestamps?.completed)}</p>
+                  <button className="btn small" style={{ width: '100%', marginTop: '10px' }} onClick={() => shareReceipt(t)}>📤 Share receipt</button>
+                </div>
+              );
+            })()}
           </div>
         ))
       )}
@@ -68,8 +73,25 @@ export default function History({ onBack, onRebook }) {
   );
 }
 
-function estimatePart(t) {
-  return t.finalFare ?? t.fareEstimate ?? 0;
+function shareReceipt(t) {
+  const lines = [
+    '🧾 DriveLocal receipt',
+    `${t.pickup?.address || 'Pickup'} → ${t.destination?.address || 'Destination'}`,
+    `Distance: ${t.distanceKm ?? '-'} km · Time: ${t.durationMin ?? '-'} min`,
+    `Fare: ${formatRand(t.finalFare ?? t.fareEstimate)}`,
+    ...(t.tipAmount > 0 ? [`Tip: ${formatRand(t.tipAmount)}`] : []),
+    t.rating != null ? `Rating: ${t.rating}★` : '',
+  ].filter(Boolean);
+  const text = lines.join('\n');
+
+  if (navigator.share) {
+    navigator.share({ title: 'DriveLocal receipt', text }).catch(() => {});
+  } else {
+    // Fallback: WhatsApp share (no phone number -> opens the share picker).
+    const msg = encodeURIComponent(text);
+    const url = `https://api.whatsapp.com/send?text=${msg}`;
+    window.open(url, '_blank', 'noopener');
+  }
 }
 
 function timeLabel(iso) {

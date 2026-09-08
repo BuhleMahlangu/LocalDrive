@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Dashboard from '../screens/driver/Dashboard.jsx';
 import Profile from '../screens/driver/Profile.jsx';
 import Trips from '../screens/driver/Trips.jsx';
+import ThemeToggle from '../components/ThemeToggle.jsx';
 
 export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   const [view, setView] = useState('dashboard');
@@ -18,6 +19,7 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <span className="brand">DriveLocal · Driver</span>
         <span className="user-chip">{user.name || user.phone}</span>
         <button className="chip-btn" onClick={() => onSwitchRole('customer')} title="Preview the customer app">🙂 Customer mode</button>
+        <ThemeToggle />
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
 

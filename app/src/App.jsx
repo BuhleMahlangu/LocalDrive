@@ -3,6 +3,7 @@ import Landing from './screens/Landing.jsx';
 import Login from './screens/Login.jsx';
 import DriverShell from './shells/DriverShell.jsx';
 import CustomerShell from './shells/CustomerShell.jsx';
+import PWAInstallPrompt from './components/PWAInstallPrompt.jsx';
 import { getToken, getStoredUser, isDriverUser, clearSession, api } from './api.js';
 
 export default function App() {
@@ -65,8 +66,12 @@ export default function App() {
 
   const shared = { user, setUser, onLogout: handleLogout, onSwitchRole: switchRole };
 
-  if (role === 'driver') {
-    return <DriverShell {...shared} />;
-  }
-  return <CustomerShell {...shared} />;
+  return (
+    <>
+      <PWAInstallPrompt />
+      {role === 'driver'
+        ? <DriverShell {...shared} />
+        : <CustomerShell {...shared} />}
+    </>
+  );
 }
