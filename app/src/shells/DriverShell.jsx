@@ -3,6 +3,8 @@ import Dashboard from '../screens/driver/Dashboard.jsx';
 import Profile from '../screens/driver/Profile.jsx';
 import Trips from '../screens/driver/Trips.jsx';
 import Admin from '../screens/driver/Admin.jsx';
+import Analytics from '../screens/driver/Analytics.jsx';
+import Revenue from '../screens/driver/Revenue.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Icon from '../components/Icon.jsx';
 
@@ -33,6 +35,14 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <Trips />
       </div>
 
+      <div style={{ display: view === 'analytics' ? undefined : 'none' }}>
+        <Analytics />
+      </div>
+
+      <div style={{ display: view === 'revenue' ? undefined : 'none' }}>
+        <Revenue />
+      </div>
+
       <div style={{ display: view === 'profile' ? undefined : 'none' }}>
         <Profile user={user} onUserUpdate={setUser} />
       </div>
@@ -47,6 +57,12 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         </button>
         <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')}>
           <Icon name="trips" className="nav-icon" /> Trips
+        </button>
+        <button className={view === 'analytics' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('analytics')}>
+          <Icon name="chart" className="nav-icon" /> Insights
+        </button>
+        <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')}>
+          <Icon name="coins" className="nav-icon" /> Revenue
         </button>
         <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')}>
           <Icon name="gear" className="nav-icon" /> Admin

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (lint + unit tests + smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      NODE_ENV: test
+      DB_FILE: ":memory:"
+      JWT_SECRET: ci-secret-ci-secret-ci-secret-please-change
+      DRIVER_PHONE: "+27000000000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+      # Full-stack smoke: boot the real server (dev mode = fixed OTP + console
+      # SMS), wait for /health, then run scripts/smoke.js against it.
+      - name: Boot server + run smoke
+        env:
+          NODE_ENV: development
+          DB_FILE: /tmp/drivelocal-smoke.sqlite
+        run: |
+          node src/server.js > /tmp/backend.log 2>&1 &
+          for i in $(seq 1 40); do
+            curl -fsS http://localhost:4000/health && break || sleep 0.5
+          done
+          npm run smoke
+
+  frontend:
+    name: Frontend (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

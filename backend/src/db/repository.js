@@ -517,4 +517,143 @@ module.exports = {
     const rows = db.prepare('SELECT key, value, updated_at FROM settings ORDER BY key ASC').all();
     return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updated_at }));
   },
+
+  // ---------- Fare disputes ----------
+  createDispute({ tripId, userId, reason }) {
+    const id = uid('disp');
+    db.prepare('INSERT INTO fare_disputes (id, trip_id, user_id, reason) VALUES (?, ?, ?, ?)').run(id, tripId, userId, reason || null);
+    return db.prepare('SELECT * FROM fare_disputes WHERE id = ?').get(id);
+  },
+
+  getDisputeByTrip(tripId) {
+    return db.prepare('SELECT * FROM fare_disputes WHERE trip_id = ? ORDER BY created_at DESC LIMIT 1').get(tripId);
+  },
+
+  resolveDispute(id, resolution) {
+    db.prepare("UPDATE fare_disputes SET status = 'resolved', resolution = ?, resolved_at = datetime('now') WHERE id = ?").run(resolution, id);
+    return db.prepare('SELECT * FROM fare_disputes WHERE id = ?').get(id);
+  },
+
+  listOpenDisputes() {
+    return db.prepare("SELECT * FROM fare_disputes WHERE status = 'open' ORDER BY created_at DESC").all();
+  },
+
+  // ---------- Promo codes ----------
+  getPromoByCode(code) {
+    return db.prepare("SELECT * FROM promo_codes WHERE code = ? AND active = 1").get(code);
+  },
+
+  usePromo(id) {
+    db.prepare('UPDATE promo_codes SET used_count = used_count + 1 WHERE id = ?').run(id);
+  },
+
+  createPromo({ code, discountPercent, maxUses, validUntil }) {
+    const id = uid('promo');
+    db.prepare('INSERT INTO promo_codes (id, code, discount_percent, max_uses, valid_until) VALUES (?, ?, ?, ?, ?)').run(id, code, discountPercent || 10, maxUses || 50, validUntil || null);
+    return db.prepare('SELECT * FROM promo_codes WHERE id = ?').get(id);
+  },
+
+  listPromos() {
+    return db.prepare('SELECT * FROM promo_codes ORDER BY created_at DESC').all();
+  },
+
+  // ---------- Recent destinations ----------
+  saveRecentDestination(userId, { destAddress, destLat, destLng, destNote, pickupAddress, pickupLat, pickupLng }) {
+    // Try to update existing, otherwise insert
+    const existing = db.prepare(
+      'SELECT id FROM recent_destinations WHERE user_id = ? AND dest_lat = ? AND dest_lng = ?',
+    ).get(userId, destLat, destLng);
+    if (existing) {
+      db.prepare("UPDATE recent_destinations SET used_count = used_count + 1, last_used = datetime('now') WHERE id = ?").run(existing.id);
+    } else {
+      const id = uid('rd');
+      db.prepare(
+        'INSERT INTO recent_destinations (id, user_id, dest_address, dest_lat, dest_lng, dest_note, pickup_address, pickup_lat, pickup_lng) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(id, userId, destAddress, destLat, destLng, destNote || null, pickupAddress || null, pickupLat || null, pickupLng || null);
+    }
+  },
+
+  getRecentDestinations(userId, limit = 5) {
+    return db.prepare(
+      'SELECT * FROM recent_destinations WHERE user_id = ? ORDER BY used_count DESC, last_used DESC LIMIT ?',
+    ).all(userId, limit).map((r) => ({
+      id: r.id,
+      destAddress: r.dest_address,
+      destLat: r.dest_lat,
+      destLng: r.dest_lng,
+      destNote: r.dest_note,
+      pickupAddress: r.pickup_address,
+      pickupLat: r.pickup_lat,
+      pickupLng: r.pickup_lng,
+      usedCount: r.used_count,
+      lastUsed: r.last_used,
+    }));
+  },
+
+  deleteRecentDestination(id, userId) {
+    db.prepare('DELETE FROM recent_destinations WHERE id = ? AND user_id = ?').run(id, userId);
+  },
+
+  // ---------- Driver analytics ----------
+  getDriverAnalytics(driverId) {
+    const trips = db.prepare('SELECT * FROM trips WHERE driver_id = ? ORDER BY requested_at DESC').all(driverId);
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    // Daily earnings for last 7 days
+    const dailyEarnings = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dayStr = d.toISOString().slice(0, 10);
+      const dayTrips = trips.filter((t) => t.status === 'completed' && (t.completed_at || '').startsWith(dayStr));
+      dailyEarnings.push({
+        date: dayStr,
+        label: d.toLocaleDateString('en-ZA', { weekday: 'short' }),
+        count: dayTrips.length,
+        earnings: dayTrips.reduce((s, t) => s + (t.final_fare || 0), 0),
+      });
+    }
+
+    // Hourly distribution (which hours are busiest)
+    const hourlyCount = Array(24).fill(0);
+    trips.forEach((t) => {
+      if (t.requested_at) {
+        const h = new Date(t.requested_at).getHours();
+        hourlyCount[h] += 1;
+      }
+    });
+    const busiestHours = hourlyCount.map((count, h) => ({ hour: h, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+
+    // Acceptance rate
+    const requested = trips.filter((t) => ['requested', 'accepted', 'cancelled'].includes(t.status)).length;
+    const accepted = trips.filter((t) => t.status !== 'requested' && t.driver_id).length;
+    const acceptanceRate = requested ? Math.round((accepted / requested) * 100) : 100;
+
+    // Cancellation stats
+    const cancelledByDriver = trips.filter((t) => t.cancel_actor === 'driver').length;
+    const cancelledByCustomer = trips.filter((t) => t.cancel_actor === 'customer').length;
+
+    // Average wait time (time from request to acceptance)
+    let totalWaitMs = 0;
+    let waitCount = 0;
+    trips.forEach((t) => {
+      if (t.requested_at && t.accepted_at) {
+        totalWaitMs += new Date(t.accepted_at) - new Date(t.requested_at);
+        waitCount += 1;
+      }
+    });
+    const avgWaitMin = waitCount ? Math.round(totalWaitMs / waitCount / 60000) : 0;
+
+    return {
+      dailyEarnings,
+      busiestHours,
+      acceptanceRate,
+      cancelledByDriver,
+      cancelledByCustomer,
+      avgWaitMin,
+      totalTrips: trips.length,
+      completedTrips: trips.filter((t) => t.status === 'completed').length,
+    };
+  },
 };

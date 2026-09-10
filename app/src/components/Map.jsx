@@ -65,9 +65,11 @@ export default function Map({
   routes = null,
   onMapClick,
   onSpotClick,
+  onLocate,
   className = '',
   autofit = true,
   autofitSpots = false,
+  locateControl = false,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -79,6 +81,7 @@ export default function Map({
   const prevAutofitRef = useRef(undefined);
   const resizeObserverRef = useRef(null);
   const spotClickRef = useRef(null);
+  const locateCtlRef = useRef(null);
 
   useEffect(() => { spotClickRef.current = onSpotClick; }, [onSpotClick]);
 
@@ -91,6 +94,31 @@ export default function Map({
     markersRef.current = [];
     fittedRef.current = false;
 
+    // Optional "my location" button that re-centres on the device GPS — used on
+    // screens where the caller doesn't already gate location behind a gesture.
+    if (locateControl) {
+      const btn = L.control({ position: 'bottomright' });
+      btn.onAdd = () => {
+        const el = L.DomUtil.create('div', 'leaflet-bar leaflet-control-locate');
+        el.innerHTML = '<button type="button" aria-label="My location" title="My location">🎯</button>';
+        L.DomEvent.disableClickPropagation(el);
+        el.addEventListener('click', () => {
+          if (!navigator.geolocation) return;
+          navigator.geolocation.getCurrentPosition(
+            (pos) => {
+              const { latitude, longitude } = pos.coords;
+              map.setView([latitude, longitude], Math.max(map.getZoom(), 15), { animate: true });
+              if (typeof onLocate === 'function') onLocate({ lat: latitude, lng: longitude });
+            },
+            () => {},
+            { enableHighAccuracy: true, timeout: 10000 },
+          );
+        });
+        return el;
+      };
+      locateCtlRef.current = btn.addTo(map);
+    }
+
     // The map can get mounted inside a hidden tab (display:none). Leaflet then
     // initialises at 0x0 and stays blank when the tab is later shown. Watch the
     // container and re-size whenever its dimensions actually change.
@@ -101,6 +129,10 @@ export default function Map({
     resizeObserverRef.current = ro;
 
     return () => {
+      if (locateCtlRef.current) {
+        map.removeControl(locateCtlRef.current);
+        locateCtlRef.current = null;
+      }
       resizeObserverRef.current.disconnect();
       resizeObserverRef.current = null;
       map.remove();
@@ -123,6 +155,12 @@ export default function Map({
       if (cur && onMapClick) cur.off('click', onMapClick);
     };
   }, [onMapClick]);
+
+  // The locate control call-back is kept in a ref so the handler stays fresh without
+  // recreating the map. The map-init effect below guards on mapRef so it only
+  // constructs the Leaflet map once, even if this dependency changes.
+  const onLocateRef = useRef(onLocate);
+  useEffect(() => { onLocateRef.current = onLocate; }, [onLocate]);
 
   useEffect(() => {
     const map = mapRef.current;

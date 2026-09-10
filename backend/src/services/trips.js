@@ -3,6 +3,18 @@ const config = require('../config');
 const pricing = require('./pricing');
 const { uid, now, estimatedRoadKm, isWithinService } = require('../utils/geo');
 
+// Validate a promo code: active, not expired, under use cap.
+function validatePromo(code) {
+  if (!code) return { ok: true };
+  const promo = repo.getPromoByCode(String(code).trim().toUpperCase());
+  if (!promo) return { ok: false, error: 'This promo code is not valid' };
+  if (!promo.active) return { ok: false, error: 'This promo code has been deactivated' };
+  if (new Date(promo.valid_from) > new Date()) return { ok: false, error: 'This promo code is not active yet' };
+  if (promo.valid_until && new Date(promo.valid_until) < new Date()) return { ok: false, error: 'This promo code has expired' };
+  if (promo.used_count >= promo.max_uses) return { ok: false, error: 'This promo code has reached its usage limit' };
+  return { ok: true, promo };
+}
+
 // Resolves a route to distance (km) and duration (min).
 // Uses Google Directions API if a key is configured, else a straight-line estimate.
 async function getRoute({ pickup, destination }) {
@@ -29,7 +41,7 @@ async function getRoute({ pickup, destination }) {
   return { distanceKm, durationMin: Math.max(2, distanceKm * 2 + 5), polyline: null };
 }
 
-async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null }) {
+async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null }) {
   const driver = repo.getDriver();
   const customer = repo.getUserById(customerId);
   if (!driver || !customer) {
@@ -50,13 +62,27 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
   }
 
   const route = await getRoute({ pickup, destination });
-  const estimate = pricing.estimateFare({
+  let estimate = pricing.estimateFare({
     baseFare: driver.baseFare,
     perKmRate: driver.perKmRate,
     perMinRate: driver.perMinRate,
     distanceKm: route.distanceKm,
     durationMin: route.durationMin,
   });
+
+  // Apply a promo discount to the estimate (shown to the customer as a
+  // "promo discount" line in the fare breakdown).
+  let discountAmount = 0;
+  let appliedPromo = null;
+  if (promoCode) {
+    const valid = validatePromo(promoCode);
+    if (valid.ok) {
+      const p = valid.promo;
+      discountAmount = Math.round(estimate.total * (p.discount_percent / 100) * 100) / 100;
+      estimate = { ...estimate, discount: discountAmount, promoCode: p.code, promoPercent: p.discount_percent };
+      appliedPromo = p;
+    }
+  }
 
   const trip = repo.createTrip({
     id: uid('trip'),
@@ -72,6 +98,10 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     priceModel,
     paymentMethod,
   });
+
+  // Consume the promo use (only on immediate bookings; scheduled trips consume
+  // it when actually activated to avoid holding it for a ride that never happens).
+  if (appliedPromo && !isScheduled) repo.usePromo(appliedPromo.id);
 
   return { trip, estimate, driverPublic: publicDriver(driver) };
 }
@@ -345,6 +375,7 @@ module.exports = {
   rateTrip,
   activateScheduledTrip,
   platformFeePercent,
+  validatePromo,
   publicDriver,
   withCustomerInfo,
   withDriverInfo,

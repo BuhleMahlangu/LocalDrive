@@ -2,7 +2,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
 const sms = require('./sms');
-const { checkOtpLimit } = require('./rateLimit');
+const { checkOtpLimit, checkVerifyLimit } = require('./rateLimit');
 const { makeOtp } = require('../utils/geo');
 
 const OTP_TTL_MIN = 10;
@@ -65,6 +65,12 @@ function createUserOrReject(normalized, role, name, email) {
 
 function verifyOtp({ phone, code, name, email, role }) {
   const normalized = normalizePhone(phone);
+
+  // Throttle brute-force attempts per phone per window.
+  const verifyLimit = checkVerifyLimit(normalized);
+  if (!verifyLimit.ok) {
+    return { success: false, error: 'Too many attempts, try again shortly', retryAfterSec: verifyLimit.retryAfterSec };
+  }
 
   // The code is generated + stored locally (see requestOtp) and delivered by
   // `sms.send`; validate against our own record in every environment.

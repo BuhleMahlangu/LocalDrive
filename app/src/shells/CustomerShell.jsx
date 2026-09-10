@@ -5,6 +5,7 @@ import ActiveTrip from '../screens/customer/ActiveTrip.jsx';
 import History from '../screens/customer/History.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Icon from '../components/Icon.jsx';
+import Onboarding, { hasSeenOnboarding } from '../components/Onboarding.jsx';
 import { LangToggle } from '../i18n.jsx';
 import { isDriverUser, api } from '../api.js';
 
@@ -15,6 +16,8 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
   // Bumped whenever the customer returns Home so its "ongoing trip" card and
   // upcoming list are re-fetched (they are fetched once per visit, not live).
   const [homeRefresh, setHomeRefresh] = useState(0);
+  // First-run walkthrough for new customers.
+  const [showOnboarding, setShowOnboarding] = useState(() => !hasSeenOnboarding());
 
   // If the logged-in user is also the driver (owner), offer to switch to driver mode.
   const canBeDriver = isDriverUser(user);
@@ -133,6 +136,10 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
           <Icon name="history" className="nav-icon" /> Trips
         </button>
       </nav>
+
+      {showOnboarding && (
+        <Onboarding onDone={() => setShowOnboarding(false)} />
+      )}
     </div>
   );
 }

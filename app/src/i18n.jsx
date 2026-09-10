@@ -18,6 +18,9 @@ const EN = {
   'common.phone': 'Phone number',
   'common.name': 'Name',
   'common.save': 'Save',
+  'common.skip': 'Skip',
+  'common.next': 'Next',
+  'common.done': 'Done',
 
   // Landing
   'landing.tagline': "Thubelihle & Kriel's friendly local ride — book in seconds.",
@@ -117,6 +120,7 @@ const EN = {
   'trip.rateBtn': 'Rate & tip',
   'trip.bookAnother': 'Book another ride',
   'trip.thanksRated': 'Thanks! You rated {stars}★',
+  'trip.dispute': '🤔 The fare doesn\'t seem right?',
 
   // History
   'history.title': 'Your rides',
@@ -226,6 +230,7 @@ const ZU = {
   'trip.rateBtn': 'Klelu & ithiphu',
   'trip.bookAnother': 'Buka elinye uhambo',
   'trip.thanksRated': 'Siyabonga! Uklame {stars}★',
+  'trip.dispute': '🤔 Imali ayivumelani?',
 
   'history.title': 'Izikhathi ohambo',
   'history.empty': 'Akukho khambo okwamanje — buku elakho lokuqala!',

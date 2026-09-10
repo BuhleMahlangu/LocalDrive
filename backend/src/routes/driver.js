@@ -160,6 +160,45 @@ function driverRoutes({ notify }) {
     });
   });
 
+  // Advanced analytics: daily earnings, busiest hours, acceptance rate, etc.
+  router.get('/analytics', (req, res) => {
+    res.json(repo.getDriverAnalytics(req.user.id));
+  });
+
+  // Open fare disputes (driver view) + resolution.
+  router.get('/disputes', (_req, res) => {
+    res.json({ disputes: repo.listOpenDisputes() });
+  });
+
+  router.post('/disputes/:id/resolve', (req, res, next) => {
+    try {
+      const { resolution } = req.body;
+      const dispute = repo.resolveDispute(req.params.id, resolution || 'Resolved');
+      res.json({ dispute });
+    } catch (e) { next(e); }
+  });
+
+  // Promo code management (driver/admin side).
+  router.get('/promos', (_req, res) => {
+    res.json({ promos: repo.listPromos() });
+  });
+
+  router.post('/promos', (req, res, next) => {
+    try {
+      const { code, discountPercent, maxUses, validUntil } = req.body;
+      if (!code || !/^[A-Z0-9]{3,20}$/.test(String(code).toUpperCase())) {
+        return res.status(400).json({ error: 'Code must be 3-20 letters/numbers' });
+      }
+      const promo = repo.createPromo({
+        code: String(code).toUpperCase(),
+        discountPercent: parseFloat(discountPercent),
+        maxUses: parseInt(maxUses, 10),
+        validUntil: validUntil || null,
+      });
+      res.status(201).json({ promo });
+    } catch (e) { next(e); }
+  });
+
   // Accept trip request.
   router.post('/trips/:id/accept', async (req, res, next) => {
     try {

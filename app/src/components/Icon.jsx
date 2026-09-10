@@ -67,6 +67,21 @@ const ICONS = {
       <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
     </>
   ),
+  chart: (
+    <>
+      <path d="M4 20h16" />
+      <path d="M7 16l3-4 3 2 4-6" />
+      <path d="M17 20v-4" />
+      <path d="M10 20v-8" />
+    </>
+  ),
+  coins: (
+    <>
+      <circle cx="9" cy="9" r="5" />
+      <circle cx="15" cy="15" r="5" />
+      <path d="M12 12v-2M6.5 6.5l1 1M14 14l1.5 1.5" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, className = '', strokeWidth = 1.8 }) {

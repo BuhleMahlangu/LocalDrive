@@ -4,6 +4,7 @@ import SavedPlacesBar, { SavePlaceBar } from '../../components/SavedPlaces.jsx';
 import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
 import geolocate from '../../lib/geolocate.js';
 import decodePolyline from '../../lib/polyline.js';
+import { getOrFetch } from '../../lib/offlineCache.js';
 import { useI18n } from '../../i18n.jsx';
 
 // The app serves the Kriel / Thubelihle area (Mpumalanga, South Africa), where
@@ -53,6 +54,12 @@ export default function Book({ onBack, onRequest, presetDest }) {
   // Confirmation summary shown before the request is actually sent.
   const [showConfirm, setShowConfirm] = useState(false);
   const [modalError, setModalError] = useState('');
+  // Recent destinations (one-tap rebook of a previous destination).
+  const [recentDests, setRecentDests] = useState([]);
+  // Promo code support.
+  const [promoCode, setPromoCode] = useState('');
+  const [promoApplied, setPromoApplied] = useState(null);
+  const [promoError, setPromoError] = useState('');
 
   // For re-booking, show a hint that the destination is pre-set.
   const isRebook = !!presetDest && !!dest;
@@ -98,17 +105,47 @@ export default function Book({ onBack, onRequest, presetDest }) {
   }, []);
 
   // Fetch the driver's public details (vehicle, plate, phone) from the API
-  // instead of using hardcoded values.
+  // instead of using hardcoded values. Cache offline so the booking screen
+  // still works on a patchy connection.
   useEffect(() => {
-    api('/customer/driver').then(setDriverInfo).catch(() => {});
+    getOrFetch('driver', () => api('/customer/driver'))
+      .then(setDriverInfo)
+      .catch(() => {});
   }, []);
 
   // Preset pickup spots (seeded server-side for the Kriel / Thubelihle area).
+  // Also cached offline-first.
   useEffect(() => {
-    api('/pickup-spots')
+    getOrFetch('pickup-spots', () => api('/pickup-spots').then((r) => ({ spots: Array.isArray(r.spots) ? r.spots : [] })))
       .then((r) => setSpots(Array.isArray(r.spots) ? r.spots : []))
       .catch(() => {});
   }, []);
+
+  // Recent destinations for one-tap rebook.
+  useEffect(() => {
+    api('/customer/recent-destinations')
+      .then((r) => setRecentDests(Array.isArray(r.destinations) ? r.destinations : []))
+      .catch(() => {});
+  }, []);
+
+  // Apply / validate a promo code when the user types it.
+  function applyPromo() {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) {
+      setPromoApplied(null);
+      setPromoError('');
+      return;
+    }
+    // Local-only validation like "is it a code-shaped string?" — the server
+    // is the authority, so we optimistically tag the estimate and let the
+    // booking POST confirm/reject the code.
+    setPromoApplied({ code, percent: 10 });
+    setPromoError('');
+    setEstimate((prev) => {
+      if (prev && prev.discount) return prev;
+      return prev;
+    });
+  }
 
   // When a landmark is chosen, use it as the human description. If a pin isn't
   // placed yet we only fill in the description — we do NOT drop a pin for the
@@ -142,6 +179,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
       body: {
         pickup,
         destination: dest,
+        promoCode: promoApplied?.code || null,
       },
     })
       .then((res) => {
@@ -155,7 +193,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [pickup, dest]);
+  }, [pickup, dest, promoApplied?.code]);
 
   // Pick a pickup spot — used for both map-pin taps and the nearest-spot bar.
   const applySpot = useCallback((spot) => {
@@ -233,6 +271,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
       priceModel: 'distance_time',
       paymentMethod,
       scheduledAt: when === 'later' ? scheduleAt : null,
+      promoCode: promoApplied?.code || null,
     };
     api('/customer/trips', { method: 'POST', body: payload })
       .then((res) => { setShowConfirm(false); onRequest(res.trip); })
@@ -345,6 +384,27 @@ export default function Book({ onBack, onRequest, presetDest }) {
             readOnly
           />
 
+          {!isRebook && recentDests.length > 0 && (
+            <div className="recent-dests">
+              <span className="spots-head">Recent — tap to re-use</span>
+              <div className="recent-row">
+                {recentDests.slice(0, 4).map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    className="recent-chip"
+                    onClick={() => {
+                      setDest({ lat: r.destLat, lng: r.destLng, address: r.destAddress || 'Destination', note: r.destNote });
+                      setDestNote(r.destNote || '');
+                    }}
+                  >
+                    🔁 {r.destAddress || `(${r.destLat.toFixed(4)}, ${r.destLng.toFixed(4)})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isRebook && <SavedPlacesBar onPick={applySavedPlace} active={activePin === 'pickup' ? 'as pickup' : 'as destination'} />}
 
           <div className="landmark-row">
@@ -444,10 +504,35 @@ export default function Book({ onBack, onRequest, presetDest }) {
               <span className="estimate-detail">estimate · {trip?.distanceKm ?? '-'} km · {trip?.durationMin ?? '-'} min</span>
             </div>
 
+            {estimate?.discount > 0 && (
+              <div className="promo-badge">🎉 Promo applied — you save {formatRand(estimate.discount)}</div>
+            )}
+
+            <div className="field">
+              <span className="field-label">Promo code (optional)</span>
+              <div className="field-row">
+                <input
+                  value={promoCode}
+                  onChange={(e) => { setPromoCode(e.target.value); setPromoError(''); }}
+                  placeholder="e.g. WELCOME10"
+                  aria-label="Promo code"
+                  style={{ textTransform: 'uppercase' }}
+                />
+                <button type="button" className="btn small" onClick={applyPromo} disabled={!promoCode.trim()}>
+                  {promoApplied ? 'Applied ✓' : 'Apply'}
+                </button>
+              </div>
+              {promoApplied && <p className="success" style={{ margin: '4px 0 0' }}>{promoApplied.code} applied</p>}
+              {promoError && <p className="error" style={{ margin: '4px 0 0' }}>{promoError}</p>}
+            </div>
+
             <div className="fare-breakdown">
               <div className="receipt-row"><span>Base fare</span><span>{formatRand(estimate.baseFare)}</span></div>
               <div className="receipt-row"><span>Distance ({trip?.distanceKm ?? '-'} km)</span><span>{formatRand(estimate.distanceCharge)}</span></div>
               <div className="receipt-row"><span>Time ({trip?.durationMin ?? '-'} min)</span><span>{formatRand(estimate.durationCharge)}</span></div>
+              {estimate.discount > 0 && (
+                <div className="receipt-row promo-row"><span>Promo ({estimate.promoCode})</span><span>−{formatRand(estimate.discount)}</span></div>
+              )}
               <div className="receipt-row total"><span>Total</span><span>{formatRand(estimate.total)}</span></div>
             </div>
 

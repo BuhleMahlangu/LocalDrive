@@ -3,6 +3,7 @@ const repo = require('../db/repository');
 const config = require('../config');
 const { authRequired } = require('../middleware');
 const tripService = require('../services/trips');
+const push = require('../services/push');
 
 // Factory takes socket notify helpers so REST can push realtime updates.
 function customerRoutes({ notify }) {
@@ -24,16 +25,30 @@ function customerRoutes({ notify }) {
   // Public: get a price estimate for a trip.
   router.post('/estimate', async (req, res, next) => {
     try {
-      const { pickup, destination } = req.body;
+      const { pickup, destination, promoCode } = req.body;
       const route = await tripService.getRoute({ pickup, destination });
       const driver = repo.getDriver();
-      const estimate = require('../services/pricing').estimateFare({
+      let estimate = require('../services/pricing').estimateFare({
         baseFare: driver.baseFare,
         perKmRate: driver.perKmRate,
         perMinRate: driver.perMinRate,
         distanceKm: route.distanceKm,
         durationMin: route.durationMin,
       });
+      // Apply a promo discount to the estimate if a valid code is supplied.
+      if (promoCode) {
+        const valid = tripService.validatePromo(promoCode);
+        if (valid.ok) {
+          const discount = Math.min(estimate.total - driver.baseFare, Math.round(estimate.total * (valid.promo.discount_percent / 100) * 100) / 100);
+          estimate = {
+            ...estimate,
+            discount,
+            promoCode: valid.promo.code.toUpperCase(),
+            promoPercent: valid.promo.discount_percent,
+            total: Math.round((estimate.total - discount) * 100) / 100,
+          };
+        }
+      }
       res.json({ estimate, route });
     } catch (e) { next(e); }
   });
@@ -75,7 +90,7 @@ function customerRoutes({ notify }) {
   // Create a booking (trip request).
   router.post('/trips', async (req, res, next) => {
     try {
-      const { pickup, destination, priceModel, paymentMethod, scheduledAt } = req.body;
+      const { pickup, destination, priceModel, paymentMethod, scheduledAt, promoCode } = req.body;
       if (paymentMethod !== 'cash' && paymentMethod !== 'card') {
         return res.status(400).json({ error: 'Invalid payment method' });
       }
@@ -91,11 +106,29 @@ function customerRoutes({ notify }) {
           code: avail.code,
         });
       }
+
+      // Validate promo code (optional) BEFORE creating the trip so we can attach
+      // the discount to the trip and apply it to the fare.
+      let promo = null;
+      if (promoCode) {
+        promo = tripService.validatePromo(promoCode);
+        if (!promo.ok) {
+          return res.status(400).json({ error: promo.error });
+        }
+      }
+
       const { trip, estimate, driverPublic } = await tripService.createTrip({
         customerId: req.user.id,
         pickup, destination, priceModel,
         paymentMethod,
         scheduledAt: scheduledAt || null,
+        promoCode: promo?.code,
+      });
+
+      // Track recent destinations for the one-tap rebook bar.
+      repo.saveRecentDestination(req.user.id, {
+        destAddress: destination?.address, destLat: destination?.lat, destLng: destination?.lng, destNote: destination?.note,
+        pickupAddress: pickup?.address, pickupLat: pickup?.lat, pickupLng: pickup?.lng,
       });
 
       // Push the request to the single driver (only for immediate trips;
@@ -145,6 +178,14 @@ function customerRoutes({ notify }) {
       const { stars, tipAmount, feedbackTags } = req.body;
       const trip = await tripService.rateTrip(req.params.id, req.user.id, stars, tipAmount, feedbackTags);
       notify.tripUpdated(trip);
+      // Notify the driver of the rating (if the trip had a driver assigned).
+      if (trip.driverId) {
+        push.sendToUser(trip.driverId, {
+          title: 'New rating received',
+          body: `A customer rated your trip ${trip.rating != null ? trip.rating + ' stars' : ''}${trip.tipAmount > 0 ? ` and tipped R${trip.tipAmount}` : ''}.`,
+          data: { type: 'rating', tripId: trip.id },
+        });
+      }
       res.json({ trip });
     } catch (e) { next(e); }
   });
@@ -155,6 +196,45 @@ function customerRoutes({ notify }) {
       const trip = await tripService.confirmFare(req.params.id, req.user.id);
       notify.tripUpdated(trip);
       res.json({ trip });
+    } catch (e) { next(e); }
+  });
+
+  // Recent destinations (frequent rebook targets).
+  router.get('/recent-destinations', (req, res) => {
+    res.json({ destinations: repo.getRecentDestinations(req.user.id) });
+  });
+
+  router.delete('/recent-destinations/:id', (req, res) => {
+    repo.deleteRecentDestination(req.params.id, req.user.id);
+    res.json({ ok: true });
+  });
+
+  // Customer opens a fare dispute on a completed trip.
+  router.post('/trips/:id/dispute', async (req, res, next) => {
+    try {
+      const { reason } = req.body;
+      const trip = repo.getTripById(req.params.id);
+      if (!trip || trip.customerId !== req.user.id) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
+      if (trip.status !== 'completed') {
+        return res.status(409).json({ error: 'Only completed trips can be disputed' });
+      }
+      const existing = repo.getDisputeByTrip(req.params.id);
+      if (existing && existing.status === 'open') {
+        return res.status(409).json({ error: 'A dispute is already open for this trip' });
+      }
+      const dispute = repo.createDispute({ tripId: req.params.id, userId: req.user.id, reason });
+      // Notify the driver that a dispute was opened.
+      if (trip.driverId) {
+        notify.tripUpdated(trip);
+        push.sendToUser(trip.driverId, {
+          title: 'Fare dispute opened',
+          body: `A customer disputed the fare on one of your trips.`,
+          data: { type: 'dispute', tripId: trip.id },
+        });
+      }
+      res.status(201).json({ dispute });
     } catch (e) { next(e); }
   });
 

@@ -764,3 +764,106 @@ input:checked + .slider:before { transform: translateX(24px); }
   border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
 }
 .online-strip.up { background: var(--primary-soft); color: var(--primary-dark); border-color: color-mix(in srgb, var(--primary) 22%, transparent); }
+
+/* ===================== Recent destinations (one-tap rebook) ===================== */
+.recent-dests { margin: 8px 0 4px; }
+.recent-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.recent-chip {
+  background: var(--bg-soft); color: var(--ink-soft); border: 1.5px solid var(--border);
+  border-radius: 20px; padding: 8px 13px; font-size: 0.82rem; font-weight: 650; cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s; max-width: 100%; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.recent-chip:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+
+/* ================================ Promo codes ================================= */
+.promo-badge {
+  align-self: flex-start; background: var(--primary-soft); color: var(--primary-dark);
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
+  border-radius: 12px; padding: 8px 12px; font-weight: 750; font-size: 0.85rem;
+}
+.receipt-row.promo-row { color: var(--primary-dark); font-weight: 700; }
+.promo-list { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 8px; }
+.promo-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 0;
+  border-bottom: 1px dashed var(--border); font-size: 0.88rem;
+}
+.promo-code { font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+.promo-meta { color: var(--muted); font-size: 0.8rem; }
+.promo-meta:first-of-type { margin-left: auto; }
+
+/* ====================== Cancel ride reason picker ============================ */
+.reason-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0; }
+.reason-chip {
+  text-align: left; background: var(--card); border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; font-size: 0.92rem; font-weight: 650; cursor: pointer; color: var(--ink);
+  transition: border-color 0.15s, background 0.15s;
+}
+.reason-chip:hover { border-color: var(--border-strong); }
+.reason-chip.on { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+
+/* ================================ Disputes =================================== */
+.dispute-row {
+  display: flex; align-items: center; gap: 10px; padding: 10px 0;
+  border-top: 1px dashed var(--border);
+}
+.dispute-row .hint { margin: 0; flex: 1; }
+
+/* ============================== Onboarding =================================== */
+.onboard-card { text-align: center; max-width: 400px; }
+.onboard-head { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.onboard-icon {
+  width: 68px; height: 68px; border-radius: 22px; display: flex; align-items: center; justify-content: center;
+  font-size: 2rem; background: var(--primary-soft); color: var(--primary-dark);
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+  box-shadow: 0 8px 22px -8px rgba(22, 163, 74, 0.4);
+}
+.onboard-dots { display: flex; justify-content: center; gap: 8px; margin: 14px 0 4px; }
+.onboard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-strong); transition: background 0.2s, transform 0.2s; }
+.onboard-dot.on { background: var(--primary); transform: scale(1.35); }
+.onboard-actions { margin-top: 10px; }
+
+/* =========================== Analytics (driver) ============================== */
+.bar-chart { display: flex; gap: 8px; align-items: flex-end; height: 150px; padding: 12px 4px 0; }
+.bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
+.bar-track {
+  flex: 1; width: 100%; display: flex; align-items: flex-end;
+  background: var(--bg-soft); border-radius: 8px 8px 0 0; overflow: hidden; min-height: 40px;
+}
+.bar-fill {
+  width: 100%; background: var(--gradient); border-radius: 8px 8px 0 0; min-height: 4px;
+  transition: height 0.5s ease;
+}
+.bar-label { font-size: 0.7rem; color: var(--muted); font-weight: 700; }
+.bar-value { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hour-list { display: flex; flex-direction: column; gap: 8px; }
+.hour-row { display: flex; align-items: center; gap: 10px; }
+.hour-label { font-size: 0.8rem; font-weight: 700; width: 64px; }
+.hour-meter { flex: 1; background: var(--bg-soft); border-radius: 8px; height: 14px; overflow: hidden; }
+.hour-fill { height: 100%; border-radius: 8px; background: var(--driver); }
+.hour-count { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 20px; text-align: right; }
+
+/* ====================== Leaflet "my location" control ======================== */
+.leaflet-control-locate button {
+  width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--card); color: var(--ink); font-size: 1.05rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.leaflet-control-locate button:hover { background: var(--bg-soft); }
+
+/* ====================== Denser 6-up driver nav =============================== */
+.driver-app .bottom-nav { padding: 8px 4px calc(8px + env(safe-area-inset-bottom)); }
+.driver-app .nav-btn { padding: 9px 3px; font-size: 0.7rem; }
+.driver-app .nav-icon { transform: scale(0.9); }
+
+.active-eta {
+  background: var(--primary-soft); color: var(--primary-dark); display: inline-block;
+  border-radius: 10px; padding: 6px 11px; font-weight: 750; font-size: 0.87rem;
+  margin: 6px 0 10px;
+}
+
+/* ============================ Accessibility =================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+.map { touch-action: manipulation; }

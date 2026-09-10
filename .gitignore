@@ -13,6 +13,7 @@ app/dist/
 # Logs
 *.log
 npm-debug.log*
+backend/logs/
 
 # Local database + backups. The SQLite file is the source of truth and lives
 # on the server; backups go into backend/backups/ (keep them out of git).

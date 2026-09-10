@@ -144,6 +144,44 @@ CREATE TABLE IF NOT EXISTS settings (
   value      TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS fare_disputes (
+  id         TEXT PRIMARY KEY,
+  trip_id    TEXT NOT NULL,
+  user_id    TEXT NOT NULL,
+  reason     TEXT,
+  status     TEXT NOT NULL DEFAULT 'open',
+  resolution TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id         TEXT PRIMARY KEY,
+  code       TEXT UNIQUE NOT NULL,
+  discount_percent INTEGER NOT NULL DEFAULT 10,
+  max_uses   INTEGER NOT NULL DEFAULT 50,
+  used_count INTEGER NOT NULL DEFAULT 0,
+  valid_from TEXT NOT NULL DEFAULT (datetime('now')),
+  valid_until TEXT,
+  active     INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS recent_destinations (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  dest_address TEXT,
+  dest_lat   REAL,
+  dest_lng   REAL,
+  dest_note  TEXT,
+  pickup_address TEXT,
+  pickup_lat REAL,
+  pickup_lng REAL,
+  used_count INTEGER NOT NULL DEFAULT 1,
+  last_used  TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 db.exec(SCHEMA);
@@ -163,6 +201,49 @@ ensureColumn('trips', 'feedback_tags', 'TEXT');
 ensureColumn('trips', 'arrived_at', 'TEXT');
 ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
 ensureColumn('payments', 'redirect_url', 'TEXT');
+
+// ---- Ensure new tables exist for older databases ----
+db.exec(`
+  CREATE TABLE IF NOT EXISTS fare_disputes (
+    id         TEXT PRIMARY KEY,
+    trip_id    TEXT NOT NULL,
+    user_id    TEXT NOT NULL,
+    reason     TEXT,
+    status     TEXT NOT NULL DEFAULT 'open',
+    resolution TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT
+  );
+  CREATE TABLE IF NOT EXISTS promo_codes (
+    id         TEXT PRIMARY KEY,
+    code       TEXT UNIQUE NOT NULL,
+    discount_percent INTEGER NOT NULL DEFAULT 10,
+    max_uses   INTEGER NOT NULL DEFAULT 50,
+    used_count INTEGER NOT NULL DEFAULT 0,
+    valid_from TEXT NOT NULL DEFAULT (datetime('now')),
+    valid_until TEXT,
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS recent_destinations (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    dest_address TEXT,
+    dest_lat   REAL,
+    dest_lng   REAL,
+    dest_note  TEXT,
+    pickup_address TEXT,
+    pickup_lat REAL,
+    pickup_lng REAL,
+    used_count INTEGER NOT NULL DEFAULT 1,
+    last_used  TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+
+// ---- Seed a demo promo code ----
+db.prepare(`INSERT OR IGNORE INTO promo_codes (id, code, discount_percent, max_uses, valid_until)
+  VALUES ('promo_welcome10', 'WELCOME10', 10, 100, datetime('now', '+1 year'))`).run();
 
 // ---- Default pickup spots for the Kriel / Thubelihle service area ----
 // Insert-only (fixed IDs) so existing databases pick up the seed without

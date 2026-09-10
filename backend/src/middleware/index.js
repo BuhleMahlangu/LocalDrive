@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
+const { logError } = require('../services/logger');
 
 function signToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpires });
@@ -46,7 +47,7 @@ function ownerDriverOnly(req, res, next) {
 }
 
 function errorHandler(err, req, res, _next) {
-  console.error('[error]', err.message, err.stack);
+  logError(err, req);
   const status = err.status || 500;
   res.status(status).json({
     error: err.message || 'Internal server error',

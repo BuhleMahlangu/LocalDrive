@@ -7,6 +7,15 @@ import { useI18n } from '../../i18n.jsx';
 
 const FEEDBACK_TAGS = ['Friendly', 'Punctual', 'Clean car', 'Safe driving', 'Great music', 'Smooth ride', 'Helpful'];
 
+const CANCEL_REASONS = [
+  'Booking made by mistake',
+  'Changed my mind',
+  'Pickup time too far off',
+  'Fare too high',
+  'Driver took too long',
+  'Other',
+];
+
 function haversineKm(lat1, lng1, lat2, lng2) {
   const R = 6371;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -47,6 +56,15 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [sosPhone, setSosPhone] = useState('');
   const [sosError, setSosError] = useState('');
   const [confirmingFare, setConfirmingFare] = useState(false);
+  // Cancellation modal state (replaces the old window.confirm with a picker).
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState(CANCEL_REASONS[0]);
+  const [cancelling, setCancelling] = useState(false);
+  // Fare dispute modal state.
+  const [disputeOpen, setDisputeOpen] = useState(false);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputing, setDisputing] = useState(false);
+  const [disputeMsg, setDisputeMsg] = useState('');
 
   useEffect(() => {
     api('/customer/driver').then(setDriver).catch(() => {});
@@ -104,22 +122,42 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     }
   }, [trip?.pickup, trip?.destination]);
 
-  function cancel() {
-    if (!trip || !['requested', 'accepted'].includes(trip.status)) return;
-    setBusy(true);
-    setError('');
-    api(`/customer/trips/${trip.id}/cancel`, { method: 'POST', body: { reason: 'Customer cancelled' } })
-      .then(() => onExit())
-      .catch((err) => setError(err.message))
-      .finally(() => setBusy(false));
-  }
-
   function confirmCancel() {
     if (!trip || !['requested', 'accepted'].includes(trip.status)) return;
-    const message = trip.status === 'accepted'
-      ? 'Cancel this trip? Your driver is on the way.'
-      : 'Cancel this trip?';
-    if (window.confirm(message)) cancel();
+    setCancelReason(CANCEL_REASONS[0]);
+    setCancelOpen(true);
+  }
+
+  function doCancel() {
+    if (!trip) return;
+    setCancelling(true);
+    setError('');
+    api(`/customer/trips/${trip.id}/cancel`, { method: 'POST', body: { reason: cancelReason } })
+      .then(() => { setCancelOpen(false); onExit(); })
+      .catch((err) => setError(err.message))
+      .finally(() => setCancelling(false));
+  }
+
+  async function openDispute() {
+    setDisputeReason('');
+    setDisputeMsg('');
+    setDisputeOpen(true);
+  }
+
+  async function submitDispute() {
+    if (!trip) return;
+    setDisputing(true);
+    setDisputeMsg('');
+    setError('');
+    try {
+      await api(`/customer/trips/${trip.id}/dispute`, { method: 'POST', body: { reason: disputeReason || 'Fare disagreement' } });
+      setDisputeOpen(false);
+      setDisputeMsg('Dispute opened — the driver has been notified.');
+    } catch (e) {
+      setDisputeMsg(e.message || 'Could not open a dispute');
+    } finally {
+      setDisputing(false);
+    }
   }
 
   function submitRating() {
@@ -314,9 +352,9 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
               trip.fareConfirmedAt ? (
                 <div className="rate-box">
                 <p>{t('trip.rateTitle')}</p>
-                <div className="stars-row">
+                <div className="stars-row" role="radiogroup" aria-label="Rate your ride">
                   {[1,2,3,4,5].map((n) => (
-                    <button key={n} className={`star ${stars >= n ? 'on' : ''}`} onClick={() => setStars(n)}>★</button>
+                    <button key={n} className={`star ${stars >= n ? 'on' : ''}`} onClick={() => setStars(n)} role="radio" aria-checked={stars === n} aria-label={`${n} star${n > 1 ? 's' : ''}`}>★</button>
                   ))}
                 </div>
                 <div className="field">
@@ -354,6 +392,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
                   <button className="btn primary" onClick={confirmFare} disabled={confirmingFare}>
                     {confirmingFare ? '…' : t('trip.confirmFare')}
                   </button>
+                  <button className="link-btn" onClick={openDispute}>{t('trip.dispute')}</button>
                 </div>
               )
             ) : (
@@ -391,6 +430,69 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
               <button type="submit" className="btn danger" style={{ background: 'var(--danger)', color: '#fff' }}>Save & send SOS</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {cancelOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="book-header">
+              <h2>Cancel this ride?</h2>
+            </div>
+            <p className="hint">
+              {trip.status === 'accepted'
+                ? 'Your driver is on the way. Cancelling now may leave them waiting for you.'
+                : 'Let us know why, so we can improve.'}
+            </p>
+            <div className="reason-list">
+              {CANCEL_REASONS.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  className={`reason-chip ${cancelReason === r ? 'on' : ''}`}
+                  onClick={() => setCancelReason(r)}
+                >
+                  {r}
+                </button>
+              ))}
+            </div>
+            {error && <p className="error">{error}</p>}
+            <div className="btn-row" style={{ marginTop: '14px' }}>
+              <button className="btn" onClick={() => setCancelOpen(false)} disabled={cancelling}>Keep trip</button>
+              <button className="btn danger" onClick={doCancel} disabled={cancelling}>
+                {cancelling ? '…' : 'Cancel ride'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {disputeOpen && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="book-header">
+              <h2>Dispute this fare</h2>
+            </div>
+            <p className="hint">Tell us why the final fare of <b>{formatRand(trip.finalFare)}</b> doesn't seem right. Your driver will be notified and the dispute will be reviewed.</p>
+            <label className="field">
+              <span className="field-label">Reason</span>
+              <textarea
+                className="place-note"
+                rows={3}
+                value={disputeReason}
+                onChange={(e) => setDisputeReason(e.target.value)}
+                placeholder="e.g. the route taken was much longer than needed…"
+                aria-label="Dispute reason"
+              />
+            </label>
+            {disputeMsg && <p className={disputeMsg.startsWith('Dispute opened') ? 'success' : 'error'}>{disputeMsg}</p>}
+            <div className="btn-row" style={{ marginTop: '12px' }}>
+              <button className="btn" onClick={() => setDisputeOpen(false)} disabled={disputing}>Cancel</button>
+              <button className="btn danger" onClick={submitDispute} disabled={disputing || !disputeReason.trim()}>
+                {disputing ? '…' : 'Open dispute'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

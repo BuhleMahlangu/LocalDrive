@@ -18,6 +18,49 @@ function initSocket(httpServer, corsOrigins) {
   // network blip or dev restart. Reconnecting / publishing location cancels it.
   const offlineTimers = new Map();
 
+  // ---- GPS spoofing / sanity detection ----
+  // Track the last known fix per driver so a suspicious teleport (e.g. jumping
+  // >50 km between 3-second pings) can be flagged and dropped. Also reject
+  // coordinates that are plainly outside valid global ranges.
+  const lastFixes = new Map();
+  const spoofStreak = new Map();
+  const MAX_SPOOF_KM = 50; // max plausible distance between pings (3s apart)
+
+  function isPlausible(lat, lng) {
+    return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+  }
+
+  function isSpoofed(driverId, lat, lng, accuracy) {
+    const last = lastFixes.get(driverId);
+    lastFixes.set(driverId, { lat, lng });
+    if (!last) return false;
+    const km = geoKm(last.lat, last.lng, lat, lng);
+    if (km > MAX_SPOOF_KM) {
+      spoofStreak.set(driverId, (spoofStreak.get(driverId) || 0) + 1);
+      // After 3 consecutive impossible jumps, hard-offline the driver — they are
+      // almost certainly faking their GPS (or their device is broken).
+      if (spoofStreak.get(driverId) >= 3) {
+        console.warn(`[socket] ${driverId} flagged for impossible GPS jumps — going offline`);
+        repo.setDriverOnline(driverId, false);
+        spoofStreak.delete(driverId);
+        io.emit('driver:status:update', { driverId, isOnline: false });
+      }
+      return true; // drop this fix
+    }
+    spoofStreak.delete(driverId);
+    return false;
+  }
+
+  function geoKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   function clearOfflineTimer(userId) {
     const timer = offlineTimers.get(userId);
     if (timer) {
@@ -69,6 +112,8 @@ function initSocket(httpServer, corsOrigins) {
       clearOfflineTimer(id);
       const { lat, lng, heading, accuracy } = payload || {};
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
+      if (!isPlausible(lat, lng)) return;
+      if (isSpoofed(id, lat, lng, accuracy)) return;
       repo.upsertDriverLocation(id, { lat, lng, heading, accuracy });
 
       // Broadcast to any room listening for driver location.

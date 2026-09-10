@@ -1,10 +1,22 @@
-import React, { useEffect, useState } from 'react';
-import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import NotificationsToggle from '../../components/NotificationsToggle.jsx';
 import SavedPlacesBar from '../../components/SavedPlaces.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import Icon from '../../components/Icon.jsx';
 import { useI18n } from '../../i18n.jsx';
+
+// Straight-line time estimate to the pickup, matching the fare model
+// (2 min/km + 5 min) so the ETA tracks the driver live as they approach.
+function haversineKm(aLat, aLng, bLat, bLng) {
+  const R = 6371, dLat = (bLat - aLat) * Math.PI / 180, dLng = (bLng - aLng) * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function etaMin(loc, pickup) {
+  if (!loc || !pickup) return null;
+  return Math.max(1, Math.round(haversineKm(loc.lat, loc.lng, pickup.lat, pickup.lng) * 2 + 5));
+}
 
 export default function Home({ user, onBook, onResume, onRebook, onPickPlace, refreshKey = 0 }) {
   const { t } = useI18n();
@@ -15,12 +27,40 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
   const [loading, setLoading] = useState(true);
   const [driverLoading, setDriverLoading] = useState(true);
   const [recentLoading, setRecentLoading] = useState(true);
+  // Live driver-ETA on the active-trip card (no need to open ActiveTrip).
+  const [driverLoc, setDriverLoc] = useState(null);
+  const socketRef = useRef(null);
+  const activeRef = useRef(null);
 
   const supportPhone = driver?.phone || import.meta.env.VITE_DRIVER_PHONE || '+27000000000';
 
   function loadUpcoming() {
     api('/customer/trips/upcoming').then((r) => setUpcoming(r.trips || [])).catch(() => {});
   }
+
+  useEffect(() => { activeRef.current = active; }, [active]);
+
+  // Lightweight socket only while an accepted/ongoing trip exists, so the card
+  // shows a live "driver arriving in ~N min" estimate. Disconnects even earlier
+  // than ActiveTrip's own socket to avoid double listeners.
+  useEffect(() => {
+    if (!active || !['accepted', 'ongoing'].includes(active.status)) {
+      if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
+      return;
+    }
+    setDriverLoc(null);
+    const socket = connectSocket();
+    socketRef.current = socket;
+    socket.on('trip:location', (data) => {
+      if (data?.tripId === activeRef.current?.id) setDriverLoc({ lat: data.lat, lng: data.lng });
+    });
+    socket.on('trip:updated', (data) => {
+      if (data?.trip && data.trip.id === activeRef.current?.id && !['accepted', 'ongoing'].includes(data.trip.status)) {
+        setActive(null);
+      }
+    });
+    return () => { socket.disconnect(); socketRef.current = null; };
+  }, [active, active?.id, active?.status]);
 
   useEffect(() => {
     api('/customer/driver').then(setDriver).catch(() => setDriver(null)).finally(() => setDriverLoading(false));
@@ -56,7 +96,15 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
 
       {active && (
         <div className="card active-card">
-          <h3>You have an ongoing trip</h3>
+          <h3>{active.status === 'accepted' ? 'Driver on the way' : 'Trip in progress'}</h3>
+          <p className="hint" style={{ margin: '6px 0' }}>
+            {active.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {active.destination?.address || 'Destination'}
+          </p>
+          {driverLoc ? (
+            <p className="active-eta">🚗 Driver arriving in ~{etaMin(driverLoc, active.pickup)} min</p>
+          ) : (
+            <p className="hint">{active.status === 'accepted' ? 'Tracking driver…' : 'Heading to your destination'}</p>
+          )}
           <button className="btn primary" onClick={() => onResume(active)}>Open trip</button>
         </div>
       )}

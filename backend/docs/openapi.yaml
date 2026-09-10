@@ -1,0 +1,999 @@
+openapi: 3.0.3
+info:
+  title: DriveLocal API
+  version: 0.3.0
+  description: |
+    Backend for the single-driver ride-booking app serving the Kriel /
+    Thubelihle area in ZAR. One owner-driver, booked by customers via SMS-OTP.
+
+    Auth: request an OTP, then verify it to receive a `token` (JWT). Send the
+    token as `Authorization: Bearer <token>` on role-gated routes. The owner
+    driver's phone can also hit customer routes (to preview the app).
+  contact:
+    name: DriveLocal
+servers:
+  - url: http://localhost:4000
+    description: Local development
+tags:
+  - name: Auth
+    description: SMS OTP sign-in
+  - name: Public
+    description: Open, no auth required
+  - name: Customer
+    description: Customer-facing booking flow
+  - name: Driver
+    description: Owner-driver operations
+  - name: Payments
+    description: Yoco card payments
+  - name: Push
+    description: Web push subscriptions
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+        code: { type: string, nullable: true }
+    OtpRequest:
+      type: object
+      required: [phone, role]
+      properties:
+        phone: { type: string, example: "+27000000000" }
+        role: { type: string, enum: [customer, driver] }
+    OtpVerify:
+      type: object
+      required: [phone, code, role]
+      properties:
+        phone: { type: string, example: "+27000000000" }
+        code: { type: string, example: "123456", description: "Fixed dev code; real code via SMS in production" }
+        role: { type: string, enum: [customer, driver] }
+        name: { type: string, nullable: true, description: "Optional profile name on first login" }
+        email: { type: string, nullable: true }
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        phone: { type: string }
+        role: { type: string, enum: [customer, driver] }
+        name: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+    AuthOk:
+      type: object
+      properties:
+        token: { type: string }
+        user: { $ref: '#/components/schemas/User' }
+        isOwnerDriver: { type: boolean }
+    Point:
+      type: object
+      properties:
+        lat: { type: number }
+        lng: { type: number }
+        address: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+    Estimate:
+      type: object
+      properties:
+        baseFare: { type: number }
+        distanceCharge: { type: number }
+        durationCharge: { type: number }
+        subtotal: { type: number }
+        distanceKm: { type: number }
+        durationMin: { type: number }
+        tipAmount: { type: number }
+        discount: { type: number, description: "Promo discount applied (0 if none)" }
+        promoCode: { type: string, nullable: true }
+        promoPercent: { type: number, nullable: true }
+        total: { type: number }
+    EstimateBody:
+      type: object
+      required: [pickup, destination]
+      properties:
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        promoCode: { type: string, nullable: true }
+    Trip:
+      type: object
+      properties:
+        id: { type: string }
+        customerId: { type: string }
+        driverId: { type: string, nullable: true }
+        status:
+          type: string
+          enum: [requested, accepted, ongoing, completed, cancelled, scheduled]
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        priceModel: { type: string }
+        paymentMethod: { type: string, enum: [cash, card] }
+        distanceKm: { type: number }
+        durationMin: { type: number }
+        fareEstimate: { type: number }
+        finalFare: { type: number, nullable: true }
+        tipAmount: { type: number, default: 0 }
+        rating: { type: integer, nullable: true }
+        promoCode: { type: string, nullable: true }
+        promoDiscount: { type: number, nullable: true }
+        scheduledAt: { type: string, nullable: true, format: date-time }
+        requestedAt: { type: string }
+        timestamps: { type: object, additionalProperties: true }
+    CreateTripBody:
+      type: object
+      required: [pickup, destination, paymentMethod]
+      properties:
+        pickup: { $ref: '#/components/schemas/Point' }
+        destination: { $ref: '#/components/schemas/Point' }
+        priceModel: { type: string, default: distance_time }
+        paymentMethod: { type: string, enum: [cash, card] }
+        scheduledAt: { type: string, nullable: true, description: "Future time → scheduled trip; omit for immediate" }
+        promoCode: { type: string, nullable: true }
+    Place:
+      type: object
+      properties:
+        id: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [home, work, place] }
+        address: { type: string, nullable: true }
+        lat: { type: number }
+        lng: { type: number }
+        note: { type: string, nullable: true }
+    RecentDestination:
+      type: object
+      properties:
+        id: { type: string }
+        destAddress: { type: string, nullable: true }
+        destLat: { type: number }
+        destLng: { type: number }
+        destNote: { type: string, nullable: true }
+        usedCount: { type: integer }
+        lastUsed: { type: string }
+    Dispute:
+      type: object
+      properties:
+        id: { type: string }
+        tripId: { type: string }
+        userId: { type: string }
+        reason: { type: string, nullable: true }
+        status: { type: string, enum: [open, resolved] }
+        resolution: { type: string, nullable: true }
+        createdAt: { type: string }
+        resolvedAt: { type: string, nullable: true }
+    Promo:
+      type: object
+      properties:
+        id: { type: string }
+        code: { type: string }
+        discountPercent: { type: integer }
+        maxUses: { type: integer }
+        usedCount: { type: integer }
+        validFrom: { type: string }
+        validUntil: { type: string, nullable: true }
+        active: { type: integer, enum: [0, 1] }
+    CreatePromoBody:
+      type: object
+      required: [code, discountPercent, maxUses]
+      properties:
+        code: { type: string, example: FRIEND10 }
+        discountPercent: { type: integer, minimum: 1, maximum: 100 }
+        maxUses: { type: integer, minimum: 1 }
+    UpsertSpotBody:
+      type: object
+      required: [name, lat, lng]
+      properties:
+        name: { type: string }
+        category: { type: string, default: spot }
+        address: { type: string, nullable: true }
+        lat: { type: number }
+        lng: { type: number }
+        note: { type: string, nullable: true }
+        sort: { type: integer, nullable: true }
+        active: { type: integer, nullable: true }
+    DriverAnalytics:
+      type: object
+      properties:
+        dailyEarnings:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              label: { type: string }
+              count: { type: integer }
+              earnings: { type: number }
+        busiestHours:
+          type: array
+          items:
+            type: object
+            properties:
+              hour: { type: integer }
+              count: { type: integer }
+        acceptanceRate: { type: integer }
+        cancelledByDriver: { type: integer }
+        cancelledByCustomer: { type: integer }
+        avgWaitMin: { type: integer }
+        totalTrips: { type: integer }
+        completedTrips: { type: integer }
+
+paths:
+  /health:
+    get:
+      tags: [Public]
+      summary: Service liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  service: { type: string }
+                  currency: { type: string }
+                  time: { type: string }
+
+  /api/pickup-spots:
+    get:
+      tags: [Public]
+      summary: List active pickup spots in the service area
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spots:
+                    type: array
+                    items: { $ref: '#/components/schemas/UpsertSpotBody' }
+
+  /api/auth/otp/request:
+    post:
+      tags: [Auth]
+      summary: Request an SMS one-time code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OtpRequest' }
+      responses:
+        "200":
+          description: Code sent / queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  phone: { type: string }
+                  expiresInSeconds: { type: integer }
+                  dev: { type: boolean }
+        "429":
+          description: Rate limited (daily or per-window)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/auth/otp/verify:
+    post:
+      tags: [Auth]
+      summary: Verify the code and receive a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OtpVerify' }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthOk' }
+        "401":
+          description: Bad / expired / exhausted code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user (requires token)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+
+  /api/public/trips/{id}/live:
+    get:
+      tags: [Public]
+      summary: Shareable trip tracker (no personal data)
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+                  pickup: { $ref: '#/components/schemas/Point' }
+                  destination: { $ref: '#/components/schemas/Point' }
+                  distanceKm: { type: number, nullable: true }
+                  fareEstimate: { type: number, nullable: true }
+                  finalFare: { type: number, nullable: true }
+                  driver: { type: object, nullable: true }
+                  driverLoc: { type: object, nullable: true }
+        "404":
+          description: Not found
+
+  /api/customer/driver/availability:
+    get:
+      tags: [Customer]
+      summary: Is the driver online right now?
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isOnline: { type: boolean }
+  /api/customer/driver:
+    get:
+      tags: [Customer]
+      summary: Driver public profile + contact
+      responses:
+        "200":
+          description: OK
+  /api/customer/estimate:
+    post:
+      tags: [Customer]
+      summary: Estimate fare (optionally with promo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EstimateBody' }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estimate: { $ref: '#/components/schemas/Estimate' }
+                  route:
+                    type: object
+                    properties:
+                      distanceKm: { type: number }
+                      durationMin: { type: number }
+                      polyline: { type: string, nullable: true }
+  /api/customer/places:
+    get:
+      tags: [Customer]
+      summary: List saved places (home first)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Place' }
+    post:
+      tags: [Customer]
+      summary: Save a place
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Place' }
+      responses:
+        "201": { description: Created }
+  /api/customer/places/{id}:
+    put:
+      tags: [Customer]
+      summary: Update a saved place
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Customer]
+      summary: Delete a saved place
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/customer/trips:
+    post:
+      tags: [Customer]
+      summary: Book a trip (immediate or scheduled)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTripBody' }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trip: { $ref: '#/components/schemas/Trip' }
+                  estimate: { $ref: '#/components/schemas/Estimate' }
+        "400": { description: Invalid payment / promo }
+        "409":
+          description: Driver offline or pickup out of service area
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [Customer]
+      summary: Trip history
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Trip' }
+  /api/customer/trips/active:
+    get:
+      tags: [Customer]
+      summary: Current active trip (if any)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trip: { $ref: '#/components/schemas/Trip', nullable: true }
+  /api/customer/trips/upcoming:
+    get:
+      tags: [Customer]
+      summary: Scheduled trips ahead
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trips:
+                    type: array
+                    items: { $ref: '#/components/schemas/Trip' }
+  /api/customer/trips/{id}/cancel:
+    post:
+      tags: [Customer]
+      summary: Cancel a requested/accepted/scheduled trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        "200": { description: OK }
+  /api/customer/trips/{id}/rate:
+    post:
+      tags: [Customer]
+      summary: Rate + optionally tip a completed trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                stars: { type: integer, minimum: 1, maximum: 5 }
+                tipAmount: { type: number, default: 0 }
+      responses:
+        "200": { description: OK }
+  /api/customer/trips/{id}/fare-confirm:
+    post:
+      tags: [Customer]
+      summary: Confirm the driver's final fare
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/customer/trips/{id}/dispute:
+    post:
+      tags: [Customer]
+      summary: Open a fare dispute on a completed trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dispute: { $ref: '#/components/schemas/Dispute' }
+        "409": { description: Trip not completed or dispute already open }
+  /api/customer/recent-destinations:
+    get:
+      tags: [Customer]
+      summary: Most-recent destinations for one-tap rebooking
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  destinations:
+                    type: array
+                    items: { $ref: '#/components/schemas/RecentDestination' }
+  /api/customer/recent-destinations/{id}:
+    delete:
+      tags: [Customer]
+      summary: Remove a recent destination
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/customer/push-token:
+    post:
+      tags: [Customer]
+      summary: Register an FCM push token
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token: { type: string }
+                platform: { type: string }
+      responses:
+        "200": { description: OK }
+
+  /api/driver/profile:
+    put:
+      tags: [Driver]
+      summary: Update driver profile
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/me:
+    get:
+      tags: [Driver]
+      summary: Driver profile
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/online:
+    post:
+      tags: [Driver]
+      summary: Go online / offline
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [isOnline]
+              properties:
+                isOnline: { type: boolean }
+      responses:
+        "200": { description: OK }
+  /api/driver/location:
+    post:
+      tags: [Driver]
+      summary: Publish driver location (REST; the app normally uses WebSocket)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                lat: { type: number }
+                lng: { type: number }
+                heading: { type: number, nullable: true }
+                accuracy: { type: number, nullable: true }
+      responses:
+        "200": { description: OK }
+  /api/driver/route:
+    post:
+      tags: [Driver]
+      summary: Compute a navigation route
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from: { $ref: '#/components/schemas/Point' }
+                to: { $ref: '#/components/schemas/Point' }
+      responses:
+        "200": { description: OK }
+  /api/driver/spots:
+    get:
+      tags: [Driver]
+      summary: List pickup spots (incl. inactive)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Driver]
+      summary: Create a pickup spot
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertSpotBody' }
+      responses:
+        "200": { description: OK }
+  /api/driver/spots/{id}:
+    put:
+      tags: [Driver]
+      summary: Update a pickup spot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+    delete:
+      tags: [Driver]
+      summary: Delete a pickup spot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/active-trip:
+    get:
+      tags: [Driver]
+      summary: Trip currently in progress
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/pending-trip:
+    get:
+      tags: [Driver]
+      summary: The one outstanding requested trip
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/scheduled-trips:
+    get:
+      tags: [Driver]
+      summary: Upcoming scheduled trips
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/trips:
+    get:
+      tags: [Driver]
+      summary: Driver trip history
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/activate:
+    post:
+      tags: [Driver]
+      summary: Move a scheduled trip into the live queue
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/accept:
+    post:
+      tags: [Driver]
+      summary: Accept a requested trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/decline:
+    post:
+      tags: [Driver]
+      summary: Decline a requested trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/arrive:
+    post:
+      tags: [Driver]
+      summary: Arrived at pickup
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/start:
+    post:
+      tags: [Driver]
+      summary: Start the trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/complete:
+    post:
+      tags: [Driver]
+      summary: Complete the trip and settle payment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                actualDistanceKm: { type: number }
+                actualDurationMin: { type: number }
+                tipAmount: { type: number, default: 0 }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/cancel:
+    post:
+      tags: [Driver]
+      summary: Cancel a trip
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/trips/{id}/refund:
+    post:
+      tags: [Driver]
+      summary: Refund a card payment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+  /api/driver/earnings:
+    get:
+      tags: [Driver]
+      summary: Earnings summary (today / week / all-time + tips + rating)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/driver/analytics:
+    get:
+      tags: [Driver]
+      summary: Analytics (daily earnings, busiest hours, acceptance rate, waits)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DriverAnalytics' }
+  /api/driver/disputes:
+    get:
+      tags: [Driver]
+      summary: List open fare disputes
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disputes:
+                    type: array
+                    items: { $ref: '#/components/schemas/Dispute' }
+  /api/driver/disputes/{id}/resolve:
+    post:
+      tags: [Driver]
+      summary: Resolve a fare dispute
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                resolution: { type: string, nullable: true }
+      responses:
+        "200": { description: OK }
+  /api/driver/promos:
+    get:
+      tags: [Driver]
+      summary: List promo codes
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promos:
+                    type: array
+                    items: { $ref: '#/components/schemas/Promo' }
+    post:
+      tags: [Driver]
+      summary: Create a promo code
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreatePromoBody' }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promo: { $ref: '#/components/schemas/Promo' }
+  /api/driver/settings:
+    get:
+      tags: [Driver]
+      summary: Driver settings
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+    put:
+      tags: [Driver]
+      summary: Update driver settings
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+
+  /api/payments/config:
+    get:
+      tags: [Payments]
+      summary: Yoco publishable key + availability
+      responses:
+        "200": { description: OK }
+  /api/payments/checkout:
+    post:
+      tags: [Payments]
+      summary: Start a Yoco hosted checkout for a trip
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Returns checkout URL / id
+        "400":
+          description: Card not available
+  /api/payments/confirm:
+    post:
+      tags: [Payments]
+      summary: Confirm a completed Yoco checkout
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/payments/status:
+    get:
+      tags: [Payments]
+      summary: Payment status for a trip
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/payments/refund:
+    post:
+      tags: [Payments]
+      summary: Refund a card payment
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200": { description: OK }
+  /api/payments/webhook:
+    post:
+      tags: [Payments]
+      summary: Yoco webhook (raw body, signature verified)
+      responses:
+        "200": { description: OK }
+
+  /api/push/vapid:
+    get:
+      tags: [Push]
+      summary: Web-push VAPID public key
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  publicKey: { type: string, nullable: true }
+  /api/push/subscribe:
+    post:
+      tags: [Push]
+      summary: Save a web-push subscription
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, keys]
+              properties:
+                endpoint: { type: string }
+                keys:
+                  type: object
+                  required: [p256dh, auth]
+                  properties:
+                    p256dh: { type: string }
+                    auth: { type: string }
+      responses:
+        "200": { description: OK }
+  /api/push/unsubscribe:
+    post:
+      tags: [Push]
+      summary: Remove a web-push subscription
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                endpoint: { type: string }
+      responses:
+        "200": { description: OK }
