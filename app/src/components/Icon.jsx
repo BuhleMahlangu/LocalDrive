@@ -61,6 +61,12 @@ const ICONS = {
     </>
   ),
   moon: <path d="M20 13.5A8 8 0 0 1 10.5 4 7.5 7.5 0 1 0 20 13.5Z" />,
+  gear: (
+    <>
+      <circle cx="12" cy="12" r="3.2" />
+      <path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M18.5 5.5l-1.7 1.7M7.2 16.8l-1.7 1.7" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, className = '', strokeWidth = 1.8 }) {

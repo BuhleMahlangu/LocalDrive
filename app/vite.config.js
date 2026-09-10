@@ -8,7 +8,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['favicon-32.png'],
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,

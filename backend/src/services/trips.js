@@ -147,6 +147,38 @@ async function startTrip(tripId, driverId) {
   return repo.updateTrip(tripId, { status: 'ongoing', started_at: now() });
 }
 
+// Driver has reached the pickup point. The trip stays 'accepted' — this is a
+// heads-up so the customer knows to step out, and the driver starts the ride
+// (-> ongoing) once the customer is in.
+async function arriveAtPickup(tripId, driverId) {
+  const trip = repo.getTripById(tripId);
+  if (!trip || trip.driverId !== driverId || trip.status !== 'accepted') {
+    const err = new Error('Cannot mark arrival on this trip');
+    err.status = 409;
+    throw err;
+  }
+  return repo.updateTrip(tripId, { arrived_at: now() });
+}
+
+// Customer agrees with the final fare before rating/tipping.
+async function confirmFare(tripId, customerId) {
+  const trip = repo.getTripById(tripId);
+  if (!trip || trip.customerId !== customerId || trip.status !== 'completed') {
+    const err = new Error('Cannot confirm the fare for this trip');
+    err.status = 409;
+    throw err;
+  }
+  return repo.updateTrip(tripId, { fare_confirmed_at: now() });
+}
+
+// Platform fee is runtime-configurable via the admin settings page, falling
+// back to the env-configured default.
+function platformFeePercent() {
+  const setting = repo.getSetting('platform_fee_percent');
+  const parsed = parseFloat(setting);
+  return Number.isFinite(parsed) ? parsed : config.platformFeePercent;
+}
+
 // Complete the trip: final fare = estimate (distance/time model). Create a payment.
 async function completeTrip(tripId, driverId, { actualDistanceKm, actualDurationMin, tipAmount } = {}) {
   const trip = repo.getTripById(tripId);
@@ -178,6 +210,7 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   // Create the payment record. Cash trips are settled now (money handed
   // directly to the driver). Card trips stay pending until the customer
   // completes the hosted Yoco checkout.
+  const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
   repo.createPayment({
     tripId,
     amountCents: pricing.dollarsToCents(estimate.total),
@@ -187,8 +220,8 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
 
   if (trip.paymentMethod !== 'card') {
     repo.markPaymentSucceeded(tripId, {
-      driverPayoutCents: pricing.dollarsToCents(estimate.total),
-      platformFeeCents: 0,
+      driverPayoutCents: pricing.dollarsToCents(estimate.total) - platformFeeCents,
+      platformFeeCents,
     });
   }
 
@@ -202,7 +235,7 @@ async function cancelTrip(tripId, actor, reason) {
     err.status = 404;
     throw err;
   }
-  const cancellable = ['requested', 'accepted', 'scheduled'];
+  const cancellable = ['requested', 'accepted', 'ongoing', 'scheduled'];
   if (!cancellable.includes(trip.status)) {
     const err = new Error('This trip cannot be cancelled');
     err.status = 409;
@@ -254,9 +287,10 @@ async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
     if (payment && payment.provider === 'cash') {
       repo.updatePaymentAmount(tripId, pricing.dollarsToCents(estimate.total));
       if (payment.status !== 'succeeded') {
+const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
         repo.markPaymentSucceeded(tripId, {
-          driverPayoutCents: pricing.dollarsToCents(estimate.total),
-          platformFeeCents: 0,
+          driverPayoutCents: pricing.dollarsToCents(estimate.total) - platformFeeCents,
+          platformFeeCents,
         });
       }
     }
@@ -304,10 +338,13 @@ module.exports = {
   acceptTrip,
   declineTrip,
   startTrip,
+  arriveAtPickup,
+  confirmFare,
   completeTrip,
   cancelTrip,
   rateTrip,
   activateScheduledTrip,
+  platformFeePercent,
   publicDriver,
   withCustomerInfo,
   withDriverInfo,

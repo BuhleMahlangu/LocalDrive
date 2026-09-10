@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { api, setSession } from '../api.js';
+import { useI18n, LangToggle } from '../i18n.jsx';
 
 export default function Login({ role = 'customer', onLogin, onBack }) {
+  const { t } = useI18n();
   const isDriver = role === 'driver';
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
@@ -51,47 +53,46 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
 
   return (
     <div className="login-screen">
+      <LangToggle className="lang-toggle top-right" />
       <div className="brand-hero">
-        <div className="brand-badge">DL</div>
+        <div className="brand-badge"><img src="/pwa-192.png" alt="DriveLocal logo" /></div>
         <h1>DriveLocal</h1>
-        <p>{isDriver ? 'Driver login — manage trips and bookings.' : 'Your trusted local driver — book in seconds.'}</p>
+        <p>{isDriver ? t('login.taglineDriver') : t('login.taglineCustomer')}</p>
         {onBack && (
-          <span className="back-link" onClick={onBack}>‹ Change (customer / driver)</span>
+          <span className="back-link" onClick={onBack}>{t('login.changeRole')}</span>
         )}
       </div>
 
       {step === 'phone' ? (
         <form className="card" onSubmit={requestCode}>
-          <h2>{isDriver ? 'Driver login' : 'Log in with your phone'}</h2>
+          <h2>{isDriver ? t('login.titleDriver') : t('login.titleCustomer')}</h2>
           <label>
-            Phone number
-            <input type="tel" inputMode="tel" placeholder="+27 82 000 0000" value={phone} onChange={handlePhone} required autoFocus />
+            {t('common.phone')}
+            <input type="tel" inputMode="tel" placeholder={t('login.ph')} value={phone} onChange={handlePhone} required autoFocus />
           </label>
           {error && <p className="error">{error}</p>}
-          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? 'Sending…' : 'Request code'}</button>
-          <p className="hint">
-            We text you a one-time code. In local development the code is also shown in the server console.
-          </p>
+          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? t('login.sending') : t('login.requestCode')}</button>
+          <p className="hint">{t('login.devHint')}</p>
         </form>
       ) : (
         <form className="card" onSubmit={verify}>
-          <h2>Enter your code</h2>
-          <p className="hint">Code sent to {phone}</p>
+          <h2>{t('login.enterCode')}</h2>
+          <p className="hint">{t('login.codeSent', { phone })}</p>
           <label>
-            Verification code
-            <input type="text" inputMode="numeric" maxLength="6" placeholder="6-digit code" value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
+            {t('login.verificationCode')}
+            <input type="text" inputMode="numeric" maxLength="6" placeholder={t('login.codePh')} value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
           </label>
           <label>
-            Your name (optional)
+            {t('login.yourName')}
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Thabo" />
           </label>
           <label>
-            Email (optional)
+            {t('login.email')}
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
           </label>
           {error && <p className="error">{error}</p>}
-          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? 'Verifying…' : 'Verify & continue'}</button>
-          <button type="button" className="link-btn" onClick={() => setStep('phone')} disabled={loading}>Change phone number</button>
+          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? t('login.verifying') : t('login.verify')}</button>
+          <button type="button" className="link-btn" onClick={() => setStep('phone')} disabled={loading}>{t('login.changePhone')}</button>
         </form>
       )}
     </div>

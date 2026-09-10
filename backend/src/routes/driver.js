@@ -1,5 +1,6 @@
 const { Router } = require('express');
 const repo = require('../db/repository');
+const config = require('../config');
 const { authRequired, ownerDriverOnly } = require('../middleware');
 const tripService = require('../services/trips');
 const payments = require('../services/payments');
@@ -178,7 +179,17 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Start trip (arrived at pickup).
+  // Driver arrived at the pickup (customer hears "your driver is here").
+  router.post('/trips/:id/arrive', async (req, res, next) => {
+    try {
+      const trip = await tripService.arriveAtPickup(req.params.id, req.user.id);
+      notify.tripArrived(trip);
+      notify.tripUpdated(trip);
+      res.json({ trip });
+    } catch (e) { next(e); }
+  });
+
+  // Start trip (customer is in the car).
   router.post('/trips/:id/start', async (req, res, next) => {
     try {
       const trip = await tripService.startTrip(req.params.id, req.user.id);
@@ -199,6 +210,22 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
+  // Cancel an accepted or ongoing trip (driver-initiated).
+  router.post('/trips/:id/cancel', async (req, res, next) => {
+    try {
+      const trip = repo.getTripById(req.params.id);
+      if (!trip || trip.driverId !== req.user.id) {
+        return res.status(404).json({ error: 'Trip not found' });
+      }
+      if (!['accepted', 'ongoing'].includes(trip.status)) {
+        return res.status(409).json({ error: 'This trip cannot be cancelled' });
+      }
+      const updated = await tripService.cancelTrip(req.params.id, 'driver', req.body.reason || 'Cancelled by driver');
+      notify.tripUpdated(updated);
+      res.json({ trip: updated });
+    } catch (e) { next(e); }
+  });
+
   // Refund a card payment (driver-initiated, e.g. after a dispute or mistake).
   router.post('/trips/:id/refund', async (req, res, next) => {
     try {
@@ -206,6 +233,40 @@ function driverRoutes({ notify }) {
       const result = await payments.refundTripForDriver(req.user.id, tripId);
       notify.paymentUpdated(result.payment, result.trip);
       res.json(result);
+    } catch (e) { next(e); }
+  });
+
+  // ----- Admin settings (owner driver only, like all driver routes) -----
+  // Runtime knobs with env-configured defaults: pricing can also be edited via
+  // the profile endpoint, so this covers platform fee + auto-offline grace.
+  router.get('/settings', (_req, res) => {
+    const defaults = {
+      platform_fee_percent: config.platformFeePercent,
+      auto_offline_grace_ms: config.autoOfflineGraceMs,
+    };
+    const saved = {};
+    for (const row of repo.listSettings()) saved[row.key] = row.value;
+    res.json({ settings: { ...defaults, ...saved } });
+  });
+
+  router.put('/settings', (req, res, next) => {
+    try {
+      const { platform_fee_percent, auto_offline_grace_ms } = req.body || {};
+      if (platform_fee_percent != null) {
+        const n = parseFloat(platform_fee_percent);
+        if (!Number.isFinite(n) || n < 0 || n > 100) {
+          return res.status(400).json({ error: 'Platform fee must be a percentage (0-100)' });
+        }
+        repo.setSetting('platform_fee_percent', n);
+      }
+      if (auto_offline_grace_ms != null) {
+        const n = parseInt(auto_offline_grace_ms, 10);
+        if (!Number.isFinite(n) || n < 1000 || n > 3600000) {
+          return res.status(400).json({ error: 'Auto-offline grace must be between 1000 and 3600000 ms' });
+        }
+        repo.setSetting('auto_offline_grace_ms', n);
+      }
+      res.json({ saved: repo.listSettings() });
     } catch (e) { next(e); }
   });
 

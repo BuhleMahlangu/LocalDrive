@@ -39,7 +39,7 @@ export default function PWAInstallPrompt() {
 
   return (
     <div className="install-prompt">
-      <div className="brand-badge">DL</div>
+      <div className="brand-badge"><img src="/pwa-192.png" alt="DriveLocal logo" /></div>
       <div className="install-body">
         <b>Install DriveLocal</b>
         Quick access, works offline, like a real app.

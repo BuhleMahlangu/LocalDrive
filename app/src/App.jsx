@@ -3,8 +3,17 @@ import Landing from './screens/Landing.jsx';
 import Login from './screens/Login.jsx';
 import DriverShell from './shells/DriverShell.jsx';
 import CustomerShell from './shells/CustomerShell.jsx';
+import TripTracker from './screens/track/TripTracker.jsx';
 import PWAInstallPrompt from './components/PWAInstallPrompt.jsx';
+import { LangProvider } from './i18n.jsx';
 import { getToken, getStoredUser, isDriverUser, clearSession, api } from './api.js';
+
+// A shared trip link is /trip/<id> — the tracker is a standalone public page
+// that works without logging in, so the tracker takes priority over everything.
+function sharedTripId() {
+  const m = window.location.pathname.match(/^\/trip\/([^/]+)\/?$/);
+  return m ? m[1] : null;
+}
 
 export default function App() {
   const [user, setUser] = useState(getStoredUser());
@@ -31,6 +40,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed]);
 
+  if (sharedTripId()) {
+    return <TripTracker tripId={sharedTripId()} />;
+  }
+
   // Explicit role switch: a driver who logs in with the customer phone should see customer view, and vice-versa.
   function switchRole(next) {
     setRole(next);
@@ -53,25 +66,31 @@ export default function App() {
 
   if (!authed || !user) {
     if (!loginRole) {
-      return <Landing onChoose={setLoginRole} />;
+      return (
+        <LangProvider>
+          <Landing onChoose={setLoginRole} />
+        </LangProvider>
+      );
     }
     return (
-      <Login
-        role={loginRole}
-        onLogin={handleLogin}
-        onBack={() => setLoginRole(null)}
-      />
+      <LangProvider>
+        <Login
+          role={loginRole}
+          onLogin={handleLogin}
+          onBack={() => setLoginRole(null)}
+        />
+      </LangProvider>
     );
   }
 
   const shared = { user, setUser, onLogout: handleLogout, onSwitchRole: switchRole };
 
   return (
-    <>
+    <LangProvider>
       <PWAInstallPrompt />
       {role === 'driver'
         ? <DriverShell {...shared} />
         : <CustomerShell {...shared} />}
-    </>
+    </LangProvider>
   );
 }

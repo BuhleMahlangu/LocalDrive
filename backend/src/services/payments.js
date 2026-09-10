@@ -195,10 +195,11 @@ async function refundTripForDriver(driverId, tripId) {
 function markPaid(tripId, pay, checkout) {
   const amount = (checkout && checkout.amount != null ? checkout.amount : pay.amountCents) / 100;
   const payout = pricing.round(amount);
+  const platformFeeCents = Math.round(pay.amountCents * (config.platformFeePercent / 100));
   return repo.markPaymentSucceeded(tripId, {
     paymentIntentId: (checkout && checkout.id) || pay.paymentIntentId,
-    driverPayoutCents: pricing.dollarsToCents(payout),
-    platformFeeCents: 0,
+    driverPayoutCents: pricing.dollarsToCents(payout) - platformFeeCents,
+    platformFeeCents,
   });
 }
 

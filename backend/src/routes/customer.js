@@ -149,6 +149,15 @@ function customerRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
+  // Customer agrees the final fare (unlocks rating/tipping).
+  router.post('/trips/:id/fare-confirm', async (req, res, next) => {
+    try {
+      const trip = await tripService.confirmFare(req.params.id, req.user.id);
+      notify.tripUpdated(trip);
+      res.json({ trip });
+    } catch (e) { next(e); }
+  });
+
   // Register FCM push token (for later real push notifications).
   router.post('/push-token', (req, res) => {
     const { token, platform } = req.body;

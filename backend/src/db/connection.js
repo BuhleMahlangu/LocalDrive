@@ -138,6 +138,12 @@ CREATE TABLE IF NOT EXISTS pickup_spots (
   active    INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 db.exec(SCHEMA);
@@ -154,6 +160,8 @@ ensureColumn('trips', 'pickup_note', 'TEXT');
 ensureColumn('trips', 'dest_note', 'TEXT');
 ensureColumn('trips', 'scheduled_at', 'TEXT');
 ensureColumn('trips', 'feedback_tags', 'TEXT');
+ensureColumn('trips', 'arrived_at', 'TEXT');
+ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
 ensureColumn('payments', 'redirect_url', 'TEXT');
 
 // ---- Default pickup spots for the Kriel / Thubelihle service area ----

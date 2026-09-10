@@ -5,12 +5,16 @@ import ActiveTrip from '../screens/customer/ActiveTrip.jsx';
 import History from '../screens/customer/History.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import Icon from '../components/Icon.jsx';
-import { isDriverUser } from '../api.js';
+import { LangToggle } from '../i18n.jsx';
+import { isDriverUser, api } from '../api.js';
 
 export default function CustomerShell({ user, onLogout, onSwitchRole }) {
   const [view, setView] = useState('home');
   const [activeTrip, setActiveTrip] = useState(null);
   const [rebookDest, setRebookDest] = useState(null);
+  // Bumped whenever the customer returns Home so its "ongoing trip" card and
+  // upcoming list are re-fetched (they are fetched once per visit, not live).
+  const [homeRefresh, setHomeRefresh] = useState(0);
 
   // If the logged-in user is also the driver (owner), offer to switch to driver mode.
   const canBeDriver = isDriverUser(user);
@@ -27,6 +31,25 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
     setView('active');
   }
 
+  // Resume an accepted/ongoing trip: Home carries the trip it fetched, but when
+  // called without one (Book screen) re-fetch it so ActiveTrip never mounts bare.
+  function resumeActive(trip) {
+    if (trip) {
+      openActive(trip);
+      return;
+    }
+    setView('active');
+    api('/customer/trips/active')
+      .then((r) => r.trip && setActiveTrip(r.trip))
+      .catch(() => setActiveTrip(null));
+  }
+
+  function goHome() {
+    setActiveTrip(null);
+    setView('home');
+    setHomeRefresh((n) => n + 1);
+  }
+
   function startRebook(trip) {
     setRebookDest(trip ? trip.destination : null);
     setView('book');
@@ -36,6 +59,7 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
     setActiveTrip(null);
     setRebookDest(null);
     setView('home');
+    setHomeRefresh((n) => n + 1);
   }
 
   // Home / Book / History stay mounted and are hidden with CSS so that switching
@@ -47,7 +71,7 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
   return (
     <div className="app">
       <header className="topbar">
-        <span className="brand">DriveLocal</span>
+        <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /></span>
         <span className="user-chip">{user.name || user.phone}</span>
         {canBeDriver && (
           <button className="chip-btn" onClick={() => onSwitchRole('driver')} title="Open driver dashboard">
@@ -55,14 +79,16 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
           </button>
         )}
         <ThemeToggle />
+        <LangToggle />
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
 
       <div style={{ display: view === 'home' ? undefined : 'none' }}>
         <Home
           user={user}
+          refreshKey={homeRefresh}
           onBook={() => { setRebookDest(null); setView('book'); }}
-          onResume={() => setView('active')}
+          onResume={resumeActive}
           onRebook={(trip) => { setRebookDest(trip ? trip.destination : null); setView('book'); }}
           onPickPlace={(place) => {
             setRebookDest({ lat: place.lat, lng: place.lng, address: place.address || place.label, note: place.note });
@@ -75,14 +101,14 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
         <Book
           user={user}
           presetDest={rebookDest}
-          onBack={() => { setRebookDest(null); setView('home'); }}
+          onBack={goHome}
           onRequest={(trip) => { setRebookDest(null); openActive(trip); }}
-          onResume={() => setView('active')}
+          onResume={resumeActive}
         />
       </div>
 
       <div style={{ display: view === 'history' ? undefined : 'none' }}>
-        <History user={user} onBack={() => setView('home')} onRebook={startRebook} />
+        <History user={user} onBack={goHome} onRebook={startRebook} />
       </div>
 
       {showActive && (
@@ -97,7 +123,7 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
       )}
 
       <nav className="bottom-nav">
-        <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('home')}>
+        <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={goHome}>
           <Icon name="home" className="nav-icon" /> Home
         </button>
         <button className={view === 'book' ? 'nav-btn active' : 'nav-btn'} onClick={() => { setActiveTrip(null); setView('book'); }}>

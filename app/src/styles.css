@@ -147,10 +147,21 @@ h3 { font-size: 0.98rem; margin: 0; font-weight: 700; }
   font-weight: 800; letter-spacing: 0.2px; font-size: 1.04rem;
 }
 .brand::before {
-  content: "DL"; width: 26px; height: 26px; border-radius: 8px; flex: 0 0 auto;
-  display: grid; place-items: center; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.02em;
-  background: rgba(255, 255, 255, 0.22); border: 1px solid rgba(255, 255, 255, 0.35);
+  content: ""; width: 28px; height: 28px; border-radius: 8px; flex: 0 0 auto;
+  background: url("/pwa-192.png") center / cover no-repeat;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+.brand-logomark::before { display: none; }
+.brand-logomark img {
+  height: 24px; width: auto; max-width: 52vw; display: block;
+  border-radius: 9px; padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.brand-logomark em {
+  font-style: normal; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em;
+  text-transform: uppercase; color: #fff; opacity: 0.9;
 }
 .btn svg { vertical-align: -3px; margin-right: 9px; }
 .user-chip {
@@ -273,7 +284,9 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
   display: flex; align-items: center; justify-content: center; font-size: 1.9rem; font-weight: 850;
   background: var(--gradient); box-shadow: 0 14px 34px -8px rgba(22, 163, 74, 0.45);
   border: 1px solid rgba(255, 255, 255, 0.25);
+  overflow: hidden; padding: 0;
 }
+.brand-badge img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* ============================ Customer home =============================== */
 .book-hero {
@@ -412,6 +425,114 @@ input:checked + .slider:before { transform: translateX(24px); }
 @keyframes pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.3); } 50% { box-shadow: 0 0 0 10px rgba(124, 58, 237, 0); } }
 .request-head { display: flex; align-items: center; justify-content: space-between; }
 .countdown-chip { background: var(--driver); color: #fff; border-radius: 20px; padding: 3px 14px; font-weight: 800; font-size: 1.05rem; }
+.countdown-chip.big-chip { font-size: 1.6rem; padding: 6px 20px; box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.5); animation: pulse 1s ease infinite; }
+
+/* ============================== Live ETA chip ============================= */
+.eta-row { display: flex; justify-content: center; margin: 10px 0 2px; }
+.eta-chip {
+  background: var(--primary-soft); color: var(--primary-dark);
+  border: 1px solid var(--primary); border-radius: 999px;
+  padding: 7px 16px; font-weight: 750; font-size: 0.95rem;
+  display: inline-block; animation: pop 0.3s ease;
+}
+
+/* ==================== Full-screen request takeover overlay ==================== */
+.request-overlay {
+  position: fixed; inset: 0; z-index: 2101;
+  background: rgba(7, 10, 22, 0.86); backdrop-filter: blur(8px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: fade-in 0.22s ease;
+}
+.request-overlay .overlay-card {
+  width: 100%; max-width: 430px; background: var(--card); color: var(--ink);
+  border-radius: var(--radius); padding: 20px;
+  border: 2px solid var(--driver);
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.6);
+  animation: pop 0.25s ease;
+}
+.overlay-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.overlay-head h2 { margin: 0; }
+.overlay-actions { margin-top: 16px; }
+.overlay-tip { text-align: center; margin-top: 10px; }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* ============================ Generic modal sheet ============================ */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 2100;
+  background: rgba(7, 10, 22, 0.75); backdrop-filter: blur(6px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+  animation: fade-in 0.2s ease;
+}
+.modal-card {
+  width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto;
+  background: var(--card); color: var(--ink);
+  border-radius: var(--radius); padding: 20px;
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.5);
+  animation: pop 0.22s ease; position: relative;
+}
+.modal-card .book-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.modal-card .book-header h2 { margin: 0; }
+.summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+@keyframes pop { from { transform: scale(0.96); opacity: 0.6; } to { transform: scale(1); opacity: 1; } }
+
+/* ============================= SOS button ============================== */
+.sos-btn {
+  background: var(--danger); color: #fff; border: none; border-radius: 999px;
+  padding: 6px 14px; font-weight: 800; font-size: 0.82rem; cursor: pointer;
+  box-shadow: 0 4px 12px -2px rgba(229, 72, 77, 0.5);
+  flex-shrink: 0;
+}
+.sos-btn:hover { filter: brightness(1.08); }
+.sos-modal .field { margin-top: 10px; }
+
+/* ======================= Fare confirmation step ======================= */
+.fare-confirm-box {
+  margin-top: 12px; padding: 14px; border-radius: var(--radius-sm);
+  background: var(--bg-soft); border: 1px dashed var(--border-strong);
+}
+.fare-confirm-box p { margin: 0 0 6px; }
+
+/* ========================== Trip tracker page ========================== */
+.tracker-screen { display: flex; flex-direction: column; gap: 12px; }
+.tracker-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tracker-logo { height: 34px; width: auto; display: block; }
+.tracker-route .hint { margin-top: 6px; }
+.tracker-foot { text-align: center; font-size: 0.78rem; }
+
+/* ============================ Language toggle =========================== */
+.lang-toggle {
+  background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 12px; font-size: 0.8rem; font-weight: 700;
+  cursor: pointer; flex-shrink: 0;
+}
+.lang-toggle:hover { border-color: var(--primary); color: var(--primary); }
+.lang-toggle.top-right { position: absolute; top: 12px; right: 12px; z-index: 5; }
+
+/* ============================ Skeleton loading ============================ */
+.skeleton {
+  position: relative; overflow: hidden; background: var(--bg-soft);
+  border-radius: var(--radius-sm); height: 14px; margin: 6px 0;
+}
+.skeleton::after {
+  content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.55), transparent);
+  animation: shimmer 1.4s infinite;
+}
+.skeleton-card-space {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 16px 18px; min-height: 108px;
+}
+.skeleton-bar-space { min-height: 52px; }
+.skeleton-stack { flex: 1; }
+.skeleton.avatar { width: 54px; height: 54px; border-radius: 50%; flex-shrink: 0; margin-right: 14px; }
+.skeleton-line-row { display: flex; align-items: center; }
+.skeleton.line-sm { width: 55%; }
+.skeleton.line-md { width: 75%; }
+.skeleton.line-lg { width: 92%; }
+[data-theme="dark"] .skeleton::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
+}
+@keyframes shimmer { 100% { transform: translateX(100%); } }
 .active-trip { border: 2px solid var(--primary); box-shadow: 0 10px 28px -10px rgba(22, 163, 74, 0.3); }
 .earn-row { display: flex; gap: 10px; margin-top: 12px; }
 .earn-box { flex: 1; text-align: center; background: var(--bg-soft); border-radius: var(--radius-sm); padding: 16px 8px; border: 1px solid var(--border); }

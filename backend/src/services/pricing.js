@@ -1,5 +1,5 @@
 // DriveLocal pricing: base fare + per-km rate + per-minute rate.
-// Returns amounts in dollars (decimal).
+// Returns amounts in ZAR (decimal).
 
 function estimateFare({ baseFare, perKmRate, perMinRate, distanceKm, durationMin, tipAmount = 0 }) {
   const distanceCharge = Number(distanceKm || 0) * Number(perKmRate || 0);

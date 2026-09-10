@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api, formatRand } from '../../api.js';
+import Skeleton from '../../components/Skeleton.jsx';
 
 export default function Trips() {
   const [history, setHistory] = useState([]);
@@ -16,7 +17,10 @@ export default function Trips() {
     <div className="screen">
       <h1>Trip history</h1>
       {loading ? (
-        <p className="hint">Loading…</p>
+        <>
+          <Skeleton card lines={3} />
+          <Skeleton card lines={3} />
+        </>
       ) : history.length === 0 ? (
         <p className="hint">No trips yet.</p>
       ) : (

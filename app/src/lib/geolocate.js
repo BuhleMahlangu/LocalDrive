@@ -12,6 +12,13 @@
 // the map. The green accuracy circle and "±N m" label tell them how much to
 // trust it.
 //
+// Two-phase acquisition: run a burst with enableHighAccuracy:true (real GPS).
+// If the browser can't produce even one fix (desktop with no GPS chip, indoors,
+// Windows Wi-Fi positioning that turns up nothing), retry the whole burst once
+// with high accuracy off — the coarser Wi-Fi/cell fix is most of what a laptop
+// can get, and beats failing entirely. The customer can still fine-tune the pin
+// by tapping the map (or re-tapping 🎯 for better GPS on a phone outdoors).
+//
 // Returns a Promise<{ lat, lng, accuracy }> of the accepted fix, or rejects
 // when permission is denied, the API is unavailable, or no fix at all was
 // obtained — the caller then falls back to manual pinning. We never guess
@@ -42,13 +49,11 @@ async function geolocationBlockedReason() {
   return null;
 }
 
-export default function geolocate(minMeters = DESIRED_ACCURACY) {
+// One burst of consistent-fix sampling with a given accuracy mode. Resolves
+// with a fix (accepting the best found once we run out of patience), rejects
+// only when every attempt returned nothing at all in that mode.
+function runBurst(enableHighAccuracy, minMeters) {
   return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('geolocation-unsupported'));
-      return;
-    }
-
     const samples = [];
     let done = false;
     let timer = 0;
@@ -121,7 +126,7 @@ export default function geolocate(minMeters = DESIRED_ACCURACY) {
 
     const acquire = () =>
       navigator.geolocation.getCurrentPosition(onSuccess, onError, {
-        enableHighAccuracy: true,
+        enableHighAccuracy,
         maximumAge: 0,
         timeout: PER_SAMPLE_TTL * 1000,
       });
@@ -131,12 +136,31 @@ export default function geolocate(minMeters = DESIRED_ACCURACY) {
       else if (!done) finish(new Error('position-timeout'));
     }, OVERALL_TIMEOUT);
 
+    acquire();
+  });
+}
+
+export default function geolocate(minMeters = DESIRED_ACCURACY) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('geolocation-unsupported'));
+      return;
+    }
+
     // Check whether the browser/OS will refuse us BEFORE we call getCurrentPosition
     // (e.g. site permission saved as blocked, or OS location service disabled).
     geolocationBlockedReason().then((blocked) => {
-      if (blocked) finish(new Error(blocked));
-      else acquire();
-    }).catch(() => acquire());
+      if (blocked) {
+        reject(new Error(blocked));
+        return;
+      }
+      // Phase 1: precise GPS. If the browser can't produce even a single fix
+      // (desktop, no GPS chip, indoors), retry with high accuracy off — the
+      // Wi-Fi/cell fix is what most laptops can get.
+      runBurst(true, minMeters).then(resolve, () => {
+        runBurst(false, minMeters).then(resolve, reject);
+      });
+    }).catch(() => reject(new Error('geolocation-error')));
   });
 }
 

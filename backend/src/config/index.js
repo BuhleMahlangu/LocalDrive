@@ -35,6 +35,10 @@ const config = {
     subject: process.env.VAPID_SUBJECT || 'mailto:driver@drivelocal.co.za',
   },
   platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT || '0'),
+  // Grace period before auto-offlining a disconnected driver. Page refreshes,
+  // brief network blips and dev restarts reconnect within a few seconds, so we
+  // wait before assuming the driver actually went away.
+  autoOfflineGraceMs: parseInt(process.env.AUTO_OFFLINE_GRACE_MS || '60000', 10),
   currency: process.env.CURRENCY || 'zar',
   dbDriver: process.env.DB_DRIVER || 'sqlite',
   databaseUrl: process.env.DATABASE_URL,

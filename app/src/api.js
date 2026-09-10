@@ -2,6 +2,11 @@ import { io } from 'socket.io-client';
 
 const TOKEN_KEY = 'drivelocal_token';
 const USER_KEY = 'drivelocal_user';
+// The API base. In development the backend is served by the Vite proxy at the
+// same origin (/api …). In production set VITE_API_BASE to the backend origin
+// (e.g. https://api.drivelocal.example) or keep it empty to serve the SPA and
+// API from one host behind a reverse proxy.
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '');
 // The driver's phone (the owner). If the logged-in user's phone matches,
 // we show the driver dashboard instead of the customer app.
 export const DRIVER_PHONE = import.meta.env.VITE_DRIVER_PHONE || '+27000000000';
@@ -36,7 +41,7 @@ export async function api(path, { method = 'GET', body, token } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const t = token ?? getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
@@ -57,7 +62,7 @@ export async function api(path, { method = 'GET', body, token } = {}) {
 }
 
 export function connectSocket() {
-  return io({ auth: { token: getToken() } });
+  return io(API_BASE || undefined, { auth: { token: getToken() } });
 }
 
 // Format a South African phone for tel:/wa.me links.

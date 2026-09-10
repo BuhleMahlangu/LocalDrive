@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Map from '../../components/Map.jsx';
+import Skeleton from '../../components/Skeleton.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import decodePolyline from '../../lib/polyline.js';
+import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 
 const AREA_CENTER = [-26.2155, 29.2916];
 
@@ -18,51 +20,84 @@ export default function Dashboard({ user, onUserUpdate }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
+  // Full-screen takeover for an incoming request so it can't be missed.
+  const [showOverlay, setShowOverlay] = useState(false);
   const [spotEditor, setSpotEditor] = useState(false);
   const [addingSpot, setAddingSpot] = useState(false);
   const [movingSpotId, setMovingSpotId] = useState(null);
   const [spotHint, setSpotHint] = useState(null);
   const [spotNames, setSpotNames] = useState({});
   const socketRef = useRef(null);
-  const locInterval = useRef(null);
+  const watchRef = useRef(null);
   const countdownTimer = useRef(null);
   const handledRef = useRef(new Set());
+  const alertedRef = useRef(new Set());
   const pendingIdRef = useRef(null);
   const driverLocRef = useRef(null);
   const activeRef = useRef(null);
   const fetchTimer = useRef(null);
   const renameTimers = useRef({});
+  // Track GPS positions during an ongoing trip for actual distance calculation.
+  const tripLocs = useRef([]);
+  const tripStart = useRef(null);
 
   useEffect(() => { driverLocRef.current = driverLoc; }, [driverLoc]);
   useEffect(() => { activeRef.current = active; }, [active]);
 
   const publishLocation = useCallback((socket) => {
     if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
+    // Already streaming fixes — nothing to do.
+    if (watchRef.current != null) return;
+    // watchPosition streams fixes continuously (rather than hammering
+    // getCurrentPosition every 3s): fewer timeouts, lower battery, and it
+    // keeps updating even on a desktop whose location drifts.
+    watchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const payload = { lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy };
+        const { latitude, longitude, accuracy } = pos.coords;
+        const payload = { lat: latitude, lng: longitude, accuracy };
         if (socket) socket.emit('driver:location', payload);
-        setDriverLoc({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        setDriverLoc({ lat: latitude, lng: longitude });
+        // Record GPS fixes during an ongoing trip for actual distance tracking.
+        if (activeRef.current?.status === 'ongoing') {
+          tripLocs.current.push({ lat: latitude, lng: longitude, t: Date.now() });
+        }
       },
       () => {},
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 6000 },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
     );
+  }, []);
+
+  const stopWatch = useCallback(() => {
+    if (watchRef.current != null) {
+      navigator.geolocation.clearWatch(watchRef.current);
+      watchRef.current = null;
+    }
+  }, []);
+
+  const surfaceRequest = useCallback((t) => {
+    if (!t || handledRef.current.has(t.id)) return;
+    setPending(t);
+    pendingIdRef.current = t.id;
+    if (!alertedRef.current.has(t.id)) {
+      alertedRef.current.add(t.id);
+      playRequestChime();
+      setShowOverlay(true);
+    }
   }, []);
 
   const refresh = useCallback(() => {
     api('/driver/active-trip').then((r) => setActive(r.trip)).catch(() => {});
     api('/driver/pending-trip').then((r) => {
       const t = r.trip;
-      if (t && !handledRef.current.has(t.id)) {
-        setPending(t);
-        pendingIdRef.current = t.id;
-      } else if (!t) {
+      if (t) {
+        surfaceRequest(t);
+      } else {
         setPending(null);
       }
     }).catch(() => {});
     api('/driver/earnings').then(setEarnings).catch(() => {});
     api('/driver/scheduled-trips').then((r) => setScheduled(Array.isArray(r.trips) ? r.trips : [])).catch(() => {});
-  }, []);
+  }, [surfaceRequest]);
 
   // Preset pickup spots for the service area — drawn as pins for orientation.
   const refreshSpots = useCallback(() => {
@@ -85,12 +120,17 @@ export default function Dashboard({ user, onUserUpdate }) {
   useEffect(() => {
     const socket = connectSocket();
     socketRef.current = socket;
-    socket.on('connect', () => { if (online) publishLocation(socket); });
+    socket.on('connect', () => {
+      if (!online) return;
+      // Re-emit the last known fix so the server records it on the new socket;
+      // the watchPosition stream keeps feeding fresh ones afterwards.
+      const last = driverLocRef.current;
+      if (last) socket.emit('driver:location', { ...last, accuracy: last.accuracy });
+      publishLocation(socket);
+    });
     socket.on('trip:request', (data) => {
       if (data?.trip) {
-        if (handledRef.current.has(data.trip.id)) return;
-        setPending(data.trip);
-        pendingIdRef.current = data.trip.id;
+        surfaceRequest(data.trip);
         setToast('New booking request received!');
       }
     });
@@ -101,22 +141,27 @@ export default function Dashboard({ user, onUserUpdate }) {
     socket.on('trip:updated', (data) => {
       if (!data?.trip) return;
       const t = data.trip;
-      if (t.driverId === user.id) {
-        setActive(['accepted', 'ongoing'].includes(t.status) ? t : null);
-        refresh();
-      }
+      if (t.driverId !== user.id) return;
+      setActive((prev) => {
+        if (['accepted', 'ongoing'].includes(t.status)) return t;
+        if (prev && t.id === prev.id) return null;
+        return prev;
+      });
+      refresh();
     });
     return () => { socket.disconnect(); socketRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Location loop when online
+  // Start/stop the location stream when going online/offline.
   useEffect(() => {
-    if (!online) { clearInterval(locInterval.current); return; }
+    if (!online) {
+      stopWatch();
+      return;
+    }
     publishLocation(socketRef.current);
-    locInterval.current = setInterval(() => publishLocation(socketRef.current), 3000);
-    return () => clearInterval(locInterval.current);
-  }, [online, publishLocation]);
+    return () => stopWatch();
+  }, [online, publishLocation, stopWatch]);
 
   // Live "fetch the customer" route (driver -> pickup) while the trip is accepted.
   useEffect(() => {
@@ -151,6 +196,14 @@ export default function Dashboard({ user, onUserUpdate }) {
     return undefined;
   }, [active?.id, active?.status]);
 
+  // Reset GPS trip tracking when a trip transitions to ongoing.
+  useEffect(() => {
+    if (active?.status === 'ongoing') {
+      tripLocs.current = [];
+      tripStart.current = Date.now();
+    }
+  }, [active?.id, active?.status]);
+
   // Poll for state changes
   useEffect(() => {
     refresh();
@@ -163,6 +216,7 @@ export default function Dashboard({ user, onUserUpdate }) {
     handledRef.current.add(tripId);
     setPending(null);
     pendingIdRef.current = null;
+    setShowOverlay(false);
     setToast('Booking request expired');
     try {
       await api(`/driver/trips/${tripId}/decline`, { method: 'POST', body: { reason: 'Auto-declined (no response)' } });
@@ -215,10 +269,43 @@ export default function Dashboard({ user, onUserUpdate }) {
     setBusy(true);
     setError('');
     try {
-      const res = await api(`/driver/trips/${active.id}/${action}`, { method: 'POST', body: extra });
+      let body = extra;
+      if (action === 'complete') {
+        // Calculate actual distance and duration from tracked GPS fixes.
+        let actualDistanceKm = 0;
+        for (let i = 1; i < tripLocs.current.length; i++) {
+          actualDistanceKm += haversine(tripLocs.current[i - 1], tripLocs.current[i]);
+        }
+        const actualDurationMin = tripStart.current
+          ? Math.round((Date.now() - tripStart.current) / 60000)
+          : undefined;
+        body = {
+          ...extra,
+          actualDistanceKm: actualDistanceKm > 0 ? Math.round(actualDistanceKm * 100) / 100 : undefined,
+          actualDurationMin,
+        };
+        tripLocs.current = [];
+        tripStart.current = null;
+      }
+      const res = await api(`/driver/trips/${active.id}/${action}`, { method: 'POST', body });
       if (res.trip) {
         setActive(['ongoing', 'accepted'].includes(res.trip.status) ? res.trip : null);
         if (res.trip.status === 'completed') setToast('Trip completed!');
+      }
+      refresh();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  async function cancelTrip() {
+    if (!active || !['accepted', 'ongoing'].includes(active.status)) return;
+    setBusy(true);
+    setError('');
+    try {
+      const res = await api(`/driver/trips/${active.id}/cancel`, { method: 'POST', body: { reason: 'Cancelled by driver' } });
+      if (res.trip) {
+        setActive(null);
+        setToast('Trip cancelled');
       }
       refresh();
     } catch (e) { setError(e.message); }
@@ -230,9 +317,13 @@ export default function Dashboard({ user, onUserUpdate }) {
     handledRef.current.add(pending.id);
     setBusy(true);
     setError('');
+    setShowOverlay(false);
     try {
       const res = await api(`/driver/trips/${pending.id}/${action}`, { method: 'POST' });
-      if (res.trip && action === 'accept') setActive(res.trip);
+      if (res.trip && action === 'accept') {
+        setActive(res.trip);
+        playSuccessChime();
+      }
       setPending(null);
       pendingIdRef.current = null;
       refresh();
@@ -331,6 +422,40 @@ export default function Dashboard({ user, onUserUpdate }) {
     <div className="screen">
       {toast && <div className="toast">{toast}</div>}
       {error && <p className="error">{error}</p>}
+
+      {showOverlay && pending && (
+        <div className="request-overlay">
+          <div className="overlay-card">
+            <div className="overlay-head">
+              <h2>🔔 New booking request</h2>
+              <span className="countdown-chip big-chip">{countdown}s</span>
+            </div>
+            <div className="route-line">
+              <div className="route-row"><span className="dot pickup-dot" />{pending.pickup?.address || 'Pickup'}</div>
+              {pending.pickup?.note && (
+                <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{pending.pickup.note}</span></div>
+              )}
+              <div className="route-row"><span className="dot dest-dot" />{pending.destination?.address || 'Destination'}</div>
+              {pending.destination?.note && (
+                <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{pending.destination.note}</span></div>
+              )}
+            </div>
+            <p className="hint">{pending.distanceKm ?? '?'} km · est. {formatRand(pending.fareEstimate)}</p>
+            {pending.customerName && <p className="hint">Customer: {pending.customerName}{pending.customerPhone ? ` · ${pending.customerPhone}` : ''}</p>}
+            {pending.customerPhone && (
+              <div className="btn-row">
+                <a className="btn small" href={toTel(pending.customerPhone)}>📞 Call</a>
+                <a className="btn small" href={toWhatsApp(pending.customerPhone, 'Hi, I am your DriveLocal driver on the way.')} target="_blank" rel="noreferrer">💬 WhatsApp</a>
+              </div>
+            )}
+            <div className="btn-row overlay-actions">
+              <button className="btn" onClick={() => respond('decline')} disabled={busy}>Decline</button>
+              <button className="btn primary big" onClick={() => respond('accept')} disabled={busy}>Accept ride</button>
+            </div>
+            <p className="hint overlay-tip">Auto-declines in {countdown}s if you don't respond</p>
+          </div>
+        </div>
+      )}
 
       <div className="online-panel">
         <div className="online-info">
@@ -467,16 +592,22 @@ export default function Dashboard({ user, onUserUpdate }) {
               <a className="btn" href={toWhatsApp(active.customerPhone, 'Hi, I am your DriveLocal driver.')} target="_blank" rel="noreferrer">💬 WhatsApp</a>
             </div>
           )}
-          {active.status === 'accepted' && (
-            <button className="btn primary" onClick={() => act('start')} disabled={busy}>🚗 Arrived at pickup · Start trip</button>
+          {active.status === 'accepted' && !active.arrivedAt && (
+            <button className="btn primary" onClick={() => act('arrive')} disabled={busy}>🛑 I've arrived at pickup</button>
+          )}
+          {active.status === 'accepted' && active.arrivedAt && (
+            <button className="btn primary" onClick={() => act('start')} disabled={busy}>🚗 Customer in · Start trip</button>
           )}
           {active.status === 'ongoing' && (
             <button className="btn primary" onClick={() => act('complete', {})} disabled={busy}>✅ Complete trip</button>
           )}
+          {(active.status === 'accepted' || active.status === 'ongoing') && (
+            <button className="btn danger" onClick={cancelTrip} disabled={busy} style={{ marginTop: '6px' }}>Cancel trip</button>
+          )}
         </div>
       )}
 
-      {earnings && (
+      {earnings ? (
         <div className="card earnings">
           <h3>Earnings</h3>
           <div className="take-home">
@@ -495,6 +626,8 @@ export default function Dashboard({ user, onUserUpdate }) {
             <div className="stat-tile"><span className="stat-num">{scheduled.length}</span><span className="stat-label">Upcoming</span></div>
           </div>
         </div>
+      ) : (
+        <Skeleton card lines={4} />
       )}
     </div>
   );
@@ -504,4 +637,14 @@ function formatScheduled(iso) {
   if (!iso) return '';
   const d = new Date(iso);
   return d.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function haversine(a, b) {
+  const R = 6371;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const la = (a.lat * Math.PI) / 180;
+  const lb = (b.lat * Math.PI) / 180;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(la) * Math.cos(lb) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }

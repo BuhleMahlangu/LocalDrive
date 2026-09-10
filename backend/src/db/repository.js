@@ -57,6 +57,8 @@ function mapTrip(row) {
     cancelReason: row.cancel_reason,
     cancelActor: row.cancel_actor,
     scheduledAt: row.scheduled_at,
+    arrivedAt: row.arrived_at,
+    fareConfirmedAt: row.fare_confirmed_at,
     timestamps: {
       requested: row.requested_at,
       accepted: row.accepted_at,
@@ -310,7 +312,7 @@ module.exports = {
   updateTrip(id, fields) {
     const allowed = ['driver_id', 'status', 'route_polyline', 'distance_km', 'duration_min',
       'fare_estimate', 'final_fare', 'payment_method', 'tip_amount', 'rating', 'feedback_tags', 'cancel_reason', 'cancel_actor',
-      'accepted_at', 'started_at', 'completed_at', 'cancelled_at', 'scheduled_at'];
+      'accepted_at', 'started_at', 'completed_at', 'cancelled_at', 'scheduled_at', 'arrived_at', 'fare_confirmed_at'];
     const updates = [];
     const vals = [];
     for (const [key, value] of Object.entries(fields)) {
@@ -495,5 +497,24 @@ module.exports = {
        WHERE status = 'scheduled' AND (scheduled_at IS NULL OR scheduled_at >= datetime('now', '-1 hour'))
        ORDER BY COALESCE(scheduled_at, requested_at) ASC LIMIT ?`,
     ).all(limit).map(mapTrip);
+  },
+
+  // ---------- Runtime settings (admin-editable, env-provided defaults) ----------
+  getSetting(key) {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+    return row ? row.value : null;
+  },
+
+  setSetting(key, value) {
+    db.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+    ).run(key, value == null ? null : String(value));
+    return this.getSetting(key);
+  },
+
+  listSettings() {
+    const rows = db.prepare('SELECT key, value, updated_at FROM settings ORDER BY key ASC').all();
+    return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updated_at }));
   },
 };

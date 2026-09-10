@@ -4,16 +4,13 @@ import SavedPlacesBar, { SavePlaceBar } from '../../components/SavedPlaces.jsx';
 import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
 import geolocate from '../../lib/geolocate.js';
 import decodePolyline from '../../lib/polyline.js';
+import { useI18n } from '../../i18n.jsx';
 
 // The app serves the Kriel / Thubelihle area (Mpumalanga, South Africa), where
 // many places don't have usable street names. Map centre defaults to that area
 // and the flow is built around landmarks + a free-text "describe this place" note
 // so the customer and driver can find each other easily.
 const AREA_CENTER = { lat: -26.2155, lng: 29.2916 }; // Thubelihle, Kriel
-// Live driver phone (the owner) so customers can call/WhatsApp directly.
-const DRIVER_PHONE = import.meta.env.VITE_DRIVER_PHONE || '+27000000000';
-const DRIVER_VEHICLE = 'Chevrolet Spark LT';
-const DRIVER_PLATE = 'XX 000 XX';
 
 // Common landmarks used to describe informal places / drop a pin quickly.
 const LANDMARKS = [
@@ -26,6 +23,7 @@ const LANDMARKS = [
 ];
 
 export default function Book({ onBack, onRequest, presetDest }) {
+  const { t } = useI18n();
   const [pickup, setPickup] = useState(null);
   const [dest, setDest] = useState(presetDest || null);
   const [you, setYou] = useState(null); // customer's live location (red dot, for nearest-spot picking)
@@ -44,6 +42,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
   const [cardEnabled, setCardEnabled] = useState(false);
   const [pickupLandmark, setPickupLandmark] = useState(null);
   const [destLandmark, setDestLandmark] = useState(null);
+  const [driverInfo, setDriverInfo] = useState(null);
   // Which pin a map tap should set / re-adjust: 'pickup' or 'destination'.
   const [activePin, setActivePin] = useState('destination');
   // Scheduling: 'now' or 'later' with a chosen datetime (min 10 min ahead).
@@ -51,6 +50,9 @@ export default function Book({ onBack, onRequest, presetDest }) {
   const [scheduleAt, setScheduleAt] = useState(() => defaultSchedule());
   const [savedMsg, setSavedMsg] = useState(false);
   const [spots, setSpots] = useState([]);
+  // Confirmation summary shown before the request is actually sent.
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [modalError, setModalError] = useState('');
 
   // For re-booking, show a hint that the destination is pre-set.
   const isRebook = !!presetDest && !!dest;
@@ -93,6 +95,12 @@ export default function Book({ onBack, onRequest, presetDest }) {
     api('/payments/config')
       .then((cfg) => setCardEnabled(!!cfg.enabled))
       .catch(() => setCardEnabled(false));
+  }, []);
+
+  // Fetch the driver's public details (vehicle, plate, phone) from the API
+  // instead of using hardcoded values.
+  useEffect(() => {
+    api('/customer/driver').then(setDriverInfo).catch(() => {});
   }, []);
 
   // Preset pickup spots (seeded server-side for the Kriel / Thubelihle area).
@@ -201,8 +209,16 @@ export default function Book({ onBack, onRequest, presetDest }) {
 
   function confirm() {
     if (!pickup || !dest) return;
+    setModalError('');
+    setShowConfirm(true);
+  }
+
+  // Actually send the request. Kept separate from confirm() so the summary modal
+  // is the gate: once the customer taps "Confirm booking" this is posted.
+  function submit() {
+    if (!pickup || !dest) return;
     setLoading(true);
-    setError('');
+    setModalError('');
     const payload = {
       pickup: {
         ...pickup,
@@ -219,8 +235,8 @@ export default function Book({ onBack, onRequest, presetDest }) {
       scheduledAt: when === 'later' ? scheduleAt : null,
     };
     api('/customer/trips', { method: 'POST', body: payload })
-      .then((res) => onRequest(res.trip))
-      .catch((err) => setError(err.message))
+      .then((res) => { setShowConfirm(false); onRequest(res.trip); })
+      .catch((err) => setModalError(err.message))
       .finally(() => setLoading(false));
   }
 
@@ -256,22 +272,19 @@ export default function Book({ onBack, onRequest, presetDest }) {
   return (
     <div className="screen">
       <div className="book-header">
-        <button className="link-btn" onClick={onBack}>‹ Back</button>
-        <h1>Book a ride</h1>
+        <button className="link-btn" onClick={onBack}>{t('common.back')}</button>
+        <h1>{t('book.title')}</h1>
       </div>
 
-      <div className="no-street-hint">
-        No street names? No problem. Drop a pin and <b>describe the spot</b> below so
-        your driver can find it exactly.
-      </div>
+      <div className="no-street-hint">{t('book.noStreets')}</div>
 
       <div className="card">
         <label className="field">
-          <span className="field-label">Pickup — where the driver picks you up</span>
+          <span className="field-label">{t('book.pickupLabel')}</span>
           <div className="field-row">
             <input
               value={pickup?.address || ''}
-              placeholder={locating ? 'Detecting location…' : 'Tap 🎯 or the map to set pickup'}
+              placeholder={locating ? t('book.locating') : t('book.pickupPlaceholder')}
               readOnly
             />
             <button type="button" className="btn small" onClick={locatePickup} title="Use my current location">🎯</button>
@@ -325,14 +338,10 @@ export default function Book({ onBack, onRequest, presetDest }) {
 
       <div className="card">
         <label className="field">
-          <span className="field-label">
-            Destination — where you're going
-            {dest && !isRebook ? ' · tap map to move pin' : ''}
-            {isRebook ? ' · from last ride' : ''}
-          </span>
+          <span className="field-label">{t('book.destLabel')}</span>
           <input
             value={dest?.address || ''}
-            placeholder={isRebook ? 'Destination set — tap map fine to adjust' : 'Tap the map to set your destination'}
+            placeholder={isRebook ? t('book.destRebook') : t('book.destPlaceholder')}
             readOnly
           />
 
@@ -354,7 +363,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
           <textarea
             className="place-note"
             rows={2}
-            placeholder="Describe the destination (e.g. the house with the white gate, opposite the tavern)…"
+            placeholder={t('book.destNotePh')}
             value={destNote}
             onChange={(e) => setDestNote(e.target.value)}
           />
@@ -373,11 +382,11 @@ export default function Book({ onBack, onRequest, presetDest }) {
       </div>
 
       <div className="card" style={{ margin: '14px 0' }}>
-        <h3>🚗 Your driver: {DRIVER_VEHICLE}</h3>
-        <p className="hint" style={{ margin: '4px 0 8px' }}>Registration {DRIVER_PLATE} · Your trusted DriveLocal driver</p>
+        <h3>🚗 Your driver: {driverInfo?.vehicleType || 'Your driver'}</h3>
+        <p className="hint" style={{ margin: '4px 0 8px' }}>Registration {driverInfo?.licensePlate || '—'} · Your trusted DriveLocal driver</p>
         <div className="btn-row">
-          <a className="btn small" href={toTel(DRIVER_PHONE)}>📞 Call {DRIVER_PHONE}</a>
-          <a className="btn small" href={toWhatsApp(DRIVER_PHONE, 'Hi, I need help with my DriveLocal booking.')} target="_blank" rel="noreferrer">💬 WhatsApp</a>
+          {driverInfo?.phone && <a className="btn small" href={toTel(driverInfo.phone)}>📞 Call {driverInfo.phone}</a>}
+          {driverInfo?.phone && <a className="btn small" href={toWhatsApp(driverInfo.phone, 'Hi, I need help with my DriveLocal booking.')} target="_blank" rel="noreferrer">💬 WhatsApp</a>}
         </div>
       </div>
 
@@ -443,8 +452,8 @@ export default function Book({ onBack, onRequest, presetDest }) {
             </div>
 
             <div className="schedule-row">
-              <button type="button" className={`schedule-chip ${when === 'now' ? 'on' : ''}`} onClick={() => setWhen('now')}>⚡ Now</button>
-              <button type="button" className={`schedule-chip ${when === 'later' ? 'on' : ''}`} onClick={() => setWhen('later')}>📅 Schedule</button>
+              <button type="button" className={`schedule-chip ${when === 'now' ? 'on' : ''}`} onClick={() => setWhen('now')}>{t('book.now')}</button>
+              <button type="button" className={`schedule-chip ${when === 'later' ? 'on' : ''}`} onClick={() => setWhen('later')}>{t('book.schedule')}</button>
             </div>
             {when === 'later' && (
               <div className="schedule-datetime">
@@ -453,9 +462,9 @@ export default function Book({ onBack, onRequest, presetDest }) {
             )}
 
             <div className="pay-choice">
-              <button type="button" className={paymentMethod === 'cash' ? 'pay-opt active' : 'pay-opt'} onClick={() => setPaymentMethod('cash')}>💵 Cash</button>
+              <button type="button" className={paymentMethod === 'cash' ? 'pay-opt active' : 'pay-opt'} onClick={() => setPaymentMethod('cash')}>{t('book.payCash')}</button>
               {cardEnabled && (
-                <button type="button" className={paymentMethod === 'card' ? 'pay-opt active' : 'pay-opt'} onClick={() => setPaymentMethod('card')}>💳 Card</button>
+                <button type="button" className={paymentMethod === 'card' ? 'pay-opt active' : 'pay-opt'} onClick={() => setPaymentMethod('card')}>{t('book.payCard')}</button>
               )}
             </div>
 
@@ -465,14 +474,51 @@ export default function Book({ onBack, onRequest, presetDest }) {
             />
             {savedMsg && <p className="success" style={{ margin: '6px 0 0' }}>Saved to your places ✨</p>}
 
-            <button className="btn primary" onClick={confirm} disabled={loading || !dest || (when === 'later' && !scheduleAt)}>
-              {loading ? 'Booking…' : when === 'later' ? `Schedule ride · pay by ${paymentMethod}` : `Confirm · pay by ${paymentMethod}`}
+            <button className="btn primary" onClick={confirm} disabled={loading || !dest || (when === 'later' && !scheduleAt) || !estimate}>
+              {loading ? '…' : when === 'later' ? t('book.scheduleRide') : t('book.review')}
             </button>
           </div>
         ) : (
-          <p className="hint">{loading ? 'Calculating fare…' : 'Set a destination to see your fare'}</p>
+          <p className="hint">{loading ? t('book.calculating') : t('book.setDest')}</p>
         )}
       </div>
+
+      {showConfirm && estimate && (
+        <div className="modal-overlay">
+          <div className="modal-card">
+            <div className="book-header">
+              <h2>{t('book.review')}</h2>
+            </div>
+
+            <div className="route-line">
+              <div className="route-row"><span className="dot pickup-dot" />{pickup.address || 'Pickup'}</div>
+              {pickupNote && <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{pickupNote}</span></div>}
+              <div className="route-row"><span className="dot dest-dot" />{dest.address || 'Destination'}</div>
+              {destNote && <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{destNote}</span></div>}
+            </div>
+
+            <div className="receipt-row total" style={{ marginTop: '8px' }}>
+              <span>Estimated fare</span><span>{formatRand(estimate.total)}</span>
+            </div>
+            <p className="hint">{trip?.distanceKm ?? '-'} km · {trip?.durationMin ?? '-'} min</p>
+
+            <div className="summary-grid">
+              <div className="stat-tile"><span className="stat-num">{when === 'later' ? '📅' : '⚡'}</span><span className="stat-label">{when === 'later' ? new Date(scheduleAt).toLocaleString() : 'Now'}</span></div>
+              <div className="stat-tile"><span className="stat-num">{paymentMethod === 'card' ? '💳' : '💵'}</span><span className="stat-label">Pay by {paymentMethod}</span></div>
+            </div>
+
+            {modalError && <p className="error">{modalError}</p>}
+
+            <div className="btn-row" style={{ marginTop: '14px' }}>
+              <button className="btn" onClick={() => setShowConfirm(false)} disabled={loading}>{t('common.back')}</button>
+              <button className="btn primary big" onClick={submit} disabled={loading}>
+                {loading ? '…' : t('trip.cta')}
+              </button>
+            </div>
+            <p className="hint overlay-tip">Total is an estimate — driver confirms the exact fare on the trip.</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
