@@ -4,6 +4,7 @@ import Book from '../screens/customer/Book.jsx';
 import ActiveTrip from '../screens/customer/ActiveTrip.jsx';
 import History from '../screens/customer/History.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
 import Onboarding, { hasSeenOnboarding } from '../components/Onboarding.jsx';
 import { LangToggle } from '../i18n.jsx';
@@ -87,41 +88,49 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
       </header>
 
       <div style={{ display: view === 'home' ? undefined : 'none' }}>
-        <Home
-          user={user}
-          refreshKey={homeRefresh}
-          onBook={() => { setRebookDest(null); setView('book'); }}
-          onResume={resumeActive}
-          onRebook={(trip) => { setRebookDest(trip ? trip.destination : null); setView('book'); }}
-          onPickPlace={(place) => {
-            setRebookDest({ lat: place.lat, lng: place.lng, address: place.address || place.label, note: place.note });
-            setView('book');
-          }}
-        />
+        <ErrorBoundary resetKey="home">
+          <Home
+            user={user}
+            refreshKey={homeRefresh}
+            onBook={() => { setRebookDest(null); setView('book'); }}
+            onResume={resumeActive}
+            onRebook={(trip) => { setRebookDest(trip ? trip.destination : null); setView('book'); }}
+            onPickPlace={(place) => {
+              setRebookDest({ lat: place.lat, lng: place.lng, address: place.address || place.label, note: place.note });
+              setView('book');
+            }}
+          />
+        </ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'book' ? undefined : 'none' }}>
-        <Book
-          user={user}
-          presetDest={rebookDest}
-          onBack={goHome}
-          onRequest={(trip) => { setRebookDest(null); openActive(trip); }}
-          onResume={resumeActive}
-        />
+        <ErrorBoundary resetKey="book">
+          <Book
+            user={user}
+            presetDest={rebookDest}
+            onBack={goHome}
+            onRequest={(trip) => { setRebookDest(null); openActive(trip); }}
+            onResume={resumeActive}
+          />
+        </ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'history' ? undefined : 'none' }}>
-        <History user={user} onBack={goHome} onRebook={startRebook} />
+        <ErrorBoundary resetKey="history">
+          <History user={user} onBack={goHome} onRebook={startRebook} />
+        </ErrorBoundary>
       </div>
 
       {showActive && (
         <div>
-          <ActiveTrip
-            user={user}
-            initial={activeTrip}
-            onExit={closeActive}
-            onNewBooking={() => { setActiveTrip(null); setView('book'); }}
-          />
+          <ErrorBoundary resetKey="active" onReset={closeActive}>
+            <ActiveTrip
+              user={user}
+              initial={activeTrip}
+              onExit={closeActive}
+              onNewBooking={() => { setActiveTrip(null); setView('book'); }}
+            />
+          </ErrorBoundary>
         </div>
       )}
 

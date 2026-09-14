@@ -5,6 +5,7 @@ import DriverShell from './shells/DriverShell.jsx';
 import CustomerShell from './shells/CustomerShell.jsx';
 import TripTracker from './screens/track/TripTracker.jsx';
 import PWAInstallPrompt from './components/PWAInstallPrompt.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { LangProvider } from './i18n.jsx';
 import { getToken, getStoredUser, isDriverUser, clearSession, api } from './api.js';
 
@@ -41,7 +42,7 @@ export default function App() {
   }, [authed]);
 
   if (sharedTripId()) {
-    return <TripTracker tripId={sharedTripId()} />;
+    return <ErrorBoundary><TripTracker tripId={sharedTripId()} /></ErrorBoundary>;
   }
 
   // Explicit role switch: a driver who logs in with the customer phone should see customer view, and vice-versa.
@@ -68,17 +69,21 @@ export default function App() {
     if (!loginRole) {
       return (
         <LangProvider>
-          <Landing onChoose={setLoginRole} />
+          <ErrorBoundary resetKey="landing">
+            <Landing onChoose={setLoginRole} />
+          </ErrorBoundary>
         </LangProvider>
       );
     }
     return (
       <LangProvider>
-        <Login
-          role={loginRole}
-          onLogin={handleLogin}
-          onBack={() => setLoginRole(null)}
-        />
+        <ErrorBoundary resetKey={`login-${loginRole}`} onReset={() => setLoginRole(null)}>
+          <Login
+            role={loginRole}
+            onLogin={handleLogin}
+            onBack={() => setLoginRole(null)}
+          />
+        </ErrorBoundary>
       </LangProvider>
     );
   }
@@ -88,9 +93,11 @@ export default function App() {
   return (
     <LangProvider>
       <PWAInstallPrompt />
-      {role === 'driver'
-        ? <DriverShell {...shared} />
-        : <CustomerShell {...shared} />}
+      <ErrorBoundary resetKey={role} onReset={handleLogout}>
+        {role === 'driver'
+          ? <DriverShell {...shared} />
+          : <CustomerShell {...shared} />}
+      </ErrorBoundary>
     </LangProvider>
   );
 }

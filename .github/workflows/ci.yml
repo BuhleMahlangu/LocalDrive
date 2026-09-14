@@ -7,7 +7,7 @@ on:
 
 jobs:
   backend:
-    name: Backend (lint + unit tests + smoke)
+    name: Backend (lint + unit/integration tests + smoke)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,7 +42,7 @@ jobs:
           npm run smoke
 
   frontend:
-    name: Frontend (lint + build)
+    name: Frontend (lint + tests + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -56,4 +56,5 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm test
       - run: npm run build

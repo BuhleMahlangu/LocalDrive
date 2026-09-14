@@ -1,16 +1,29 @@
 const path = require('path');
 const fs = require('fs');
-const Database = require('better-sqlite3');
+const config = require('../config');
+const { createAdapter } = require('./query');
 
-const dataDir = path.join(__dirname, '..', '..', 'data');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const driver = config.dbDriver || 'sqlite';
 
-const dbFile = process.env.DB_FILE || path.join(dataDir, 'drivelocal.sqlite');
-const db = new Database(dbFile);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// ---- Postgres/PostGIS driver (production target) ----
+// Schema is applied out-of-band (backend/schema.sql contains the full DDL,
+// including PostGIS geography columns). The async `pg` adapter is the seam;
+// repository.js becomes async-aware for the migration. If `pg` or DATABASE_URL
+// are missing we fail loudly rather than silently corrupting the app.
+if (driver === 'postgres') {
+  module.exports = createAdapter({ driver });
+} else {
+  const Database = require('better-sqlite3');
 
-const SCHEMA = `
+  const dataDir = path.join(__dirname, '..', '..', 'data');
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+  const dbFile = process.env.DB_FILE || path.join(dataDir, 'drivelocal.sqlite');
+  const sqliteDb = new Database(dbFile);
+  sqliteDb.pragma('journal_mode = WAL');
+  sqliteDb.pragma('foreign_keys = ON');
+
+  const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
   phone         TEXT UNIQUE NOT NULL,
@@ -184,26 +197,26 @@ CREATE TABLE IF NOT EXISTS recent_destinations (
 );
 `;
 
-db.exec(SCHEMA);
+  sqliteDb.exec(SCHEMA);
 
-// ---- Lightweight migrations for databases created before these columns ----
-function ensureColumn(table, column, ddl) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
-  if (!cols.includes(column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  // ---- Lightweight migrations for databases created before these columns ----
+  function ensureColumn(table, column, ddl) {
+    const cols = sqliteDb.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+    if (!cols.includes(column)) {
+      sqliteDb.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    }
   }
-}
-ensureColumn('trips', 'payment_method', "TEXT NOT NULL DEFAULT 'cash'");
-ensureColumn('trips', 'pickup_note', 'TEXT');
-ensureColumn('trips', 'dest_note', 'TEXT');
-ensureColumn('trips', 'scheduled_at', 'TEXT');
-ensureColumn('trips', 'feedback_tags', 'TEXT');
-ensureColumn('trips', 'arrived_at', 'TEXT');
-ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
-ensureColumn('payments', 'redirect_url', 'TEXT');
+  ensureColumn('trips', 'payment_method', "TEXT NOT NULL DEFAULT 'cash'");
+  ensureColumn('trips', 'pickup_note', 'TEXT');
+  ensureColumn('trips', 'dest_note', 'TEXT');
+  ensureColumn('trips', 'scheduled_at', 'TEXT');
+  ensureColumn('trips', 'feedback_tags', 'TEXT');
+  ensureColumn('trips', 'arrived_at', 'TEXT');
+  ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
+  ensureColumn('payments', 'redirect_url', 'TEXT');
 
-// ---- Ensure new tables exist for older databases ----
-db.exec(`
+  // ---- Ensure new tables exist for older databases ----
+  sqliteDb.exec(`
   CREATE TABLE IF NOT EXISTS fare_disputes (
     id         TEXT PRIMARY KEY,
     trip_id    TEXT NOT NULL,
@@ -241,27 +254,28 @@ db.exec(`
   );
 `);
 
-// ---- Seed a demo promo code ----
-db.prepare(`INSERT OR IGNORE INTO promo_codes (id, code, discount_percent, max_uses, valid_until)
+  // ---- Seed a demo promo code ----
+  sqliteDb.prepare(`INSERT OR IGNORE INTO promo_codes (id, code, discount_percent, max_uses, valid_until)
   VALUES ('promo_welcome10', 'WELCOME10', 10, 100, datetime('now', '+1 year'))`).run();
 
-// ---- Default pickup spots for the Kriel / Thubelihle service area ----
-// Insert-only (fixed IDs) so existing databases pick up the seed without
-// duplicating. Coordinates are approximate service-area landmarks; the owner
-// can adjust them or ask for a custom list.
-const SPOT_SEED = [
-  { id: 'spot_kriel_town', name: 'Kriel Town Centre', category: 'town', address: 'Main street, Kriel', lat: -26.2148, lng: 29.2913, sort: 1 },
-  { id: 'spot_kriel_rank', name: 'Kriel Taxi Rank', category: 'rank', address: 'Taxi rank, Kriel', lat: -26.2162, lng: 29.2922, sort: 2 },
-  { id: 'spot_kriel_mall', name: 'Kriel Mall', category: 'mall', address: 'Kriel', lat: -26.2125, lng: 29.2945, sort: 3 },
-  { id: 'spot_thub_clinic', name: 'Thubelihle Clinic', category: 'clinic', address: 'Thubelihle, Kriel', lat: -26.219, lng: 29.2495, sort: 4 },
-  { id: 'spot_thub_hall', name: 'Thubelihle Community Hall', category: 'hall', address: 'Thubelihle, Kriel', lat: -26.221, lng: 29.247, sort: 5 },
-  { id: 'spot_thub_fourways', name: 'Thubelihle Four Ways', category: 'landmark', address: 'Four-ways junction, Thubelihle', lat: -26.2172, lng: 29.252, sort: 6 },
-  { id: 'spot_thub_school', name: 'Thubelihle Primary School', category: 'school', address: 'Thubelihle, Kriel', lat: -26.2185, lng: 29.251, sort: 7 },
-  { id: 'spot_kriel_power', name: 'Kriel Power Station Gate', category: 'landmark', address: 'Kriel Power Station Road', lat: -26.2295, lng: 29.177, sort: 8 },
-];
-const seedSpots = db.prepare(
-  'INSERT OR IGNORE INTO pickup_spots (id, name, category, address, lat, lng, note, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-);
-for (const s of SPOT_SEED) seedSpots.run(s.id, s.name, s.category, s.address, s.lat, s.lng, s.note || null, s.sort);
+  // ---- Default pickup spots for the Kriel / Thubelihle service area ----
+  // Insert-only (fixed IDs) so existing databases pick up the seed without
+  // duplicating. Coordinates are approximate service-area landmarks; the owner
+  // can adjust them or ask for a custom list.
+  const SPOT_SEED = [
+    { id: 'spot_kriel_town', name: 'Kriel Town Centre', category: 'town', address: 'Main street, Kriel', lat: -26.2148, lng: 29.2913, sort: 1 },
+    { id: 'spot_kriel_rank', name: 'Kriel Taxi Rank', category: 'rank', address: 'Taxi rank, Kriel', lat: -26.2162, lng: 29.2922, sort: 2 },
+    { id: 'spot_kriel_mall', name: 'Kriel Mall', category: 'mall', address: 'Kriel', lat: -26.2125, lng: 29.2945, sort: 3 },
+    { id: 'spot_thub_clinic', name: 'Thubelihle Clinic', category: 'clinic', address: 'Thubelihle, Kriel', lat: -26.219, lng: 29.2495, sort: 4 },
+    { id: 'spot_thub_hall', name: 'Thubelihle Community Hall', category: 'hall', address: 'Thubelihle, Kriel', lat: -26.221, lng: 29.247, sort: 5 },
+    { id: 'spot_thub_fourways', name: 'Thubelihle Four Ways', category: 'landmark', address: 'Four-ways junction, Thubelihle', lat: -26.2172, lng: 29.252, sort: 6 },
+    { id: 'spot_thub_school', name: 'Thubelihle Primary School', category: 'school', address: 'Thubelihle, Kriel', lat: -26.2185, lng: 29.251, sort: 7 },
+    { id: 'spot_kriel_power', name: 'Kriel Power Station Gate', category: 'landmark', address: 'Kriel Power Station Road', lat: -26.2295, lng: 29.177, sort: 8 },
+  ];
+  const seedSpots = sqliteDb.prepare(
+    'INSERT OR IGNORE INTO pickup_spots (id, name, category, address, lat, lng, note, sort) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  );
+  for (const s of SPOT_SEED) seedSpots.run(s.id, s.name, s.category, s.address, s.lat, s.lng, s.note || null, s.sort);
 
-module.exports = db;
+  module.exports = createAdapter({ driver: 'sqlite', sqliteDb });
+}

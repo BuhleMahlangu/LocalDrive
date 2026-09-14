@@ -37,7 +37,7 @@ function write(kind, entry) {
 }
 
 // Attach to a response's 'finish' event to record the outcome once known.
-function attachRequestLogger(req, res) {
+function attachRequestLogger(req, res, next) {
   req._dlStart = Date.now();
   res.on('finish', () => {
     const entry = {
@@ -49,10 +49,11 @@ function attachRequestLogger(req, res) {
       ip: req.ip || (req.socket && req.socket.remoteAddress) || null,
     };
     write('request', entry);
-    if (config.nodeEnv !== 'production') {
+    if (config.nodeEnv === 'development') {
       console.log(`${req.method} ${req.path} -> ${res.statusCode} (${entry.ms}ms)`);
     }
   });
+  next();
 }
 
 function logError(err, req) {

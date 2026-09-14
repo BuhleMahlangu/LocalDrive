@@ -2,6 +2,8 @@
 
 This guide takes the app live for a small single-driver service: a VPS (or always-on home server) running the Node backend, a static build of the React app, and **Caddy** providing HTTPS + reverse proxy (handles the Socket.io WebSockets automatically).
 
+The path below is the recommended **one-host** setup (frontend + API + WebSockets on one HTTPS domain). A lighter **two-host** alternative (static SPA + API) is covered at the end.
+
 ## 1. What you need
 
 - A domain (e.g. `drivelocal.example.co.za`) pointing to your server's public IP.
@@ -139,6 +141,43 @@ cd backend
 npm run smoke     # full customer <-> driver journey against the live API
 npm run backup    # confirm a snapshot is written
 ```
+
+## 11. Post-deploy checklist
+
+Run through this on the live URL before telling anyone:
+
+- [ ] **HTTPS works and the PWA installs** (browser "Add to Home screen" / install prompt).
+- [ ] **SMS OTP arrives** — real ClickSend message in production (`123456` only in dev). Sign in as both customer and driver.
+- [ ] **Location permission granted** — the #1 gotcha. On a phone it must be allowed for the domain (Settings → Privacy → Location); without it the customer can't pick up automatically and push needs HTTPS anyway.
+- [ ] **Book a trip end→end**: request → driver accepts → driver taps "I've arrived" → customer sees the arrived card → start trip → fare confirm → rating. Watch for live socket updates (no CORS / WS proxy errors in the browser console).
+- [ ] **Share link** `GET /api/public/trips/<id>/live` opens without logging in.
+- [ ] **Yoco card flow** if enabled (hosted checkout → success/cancel redirect).
+- [ ] **Backup** — schedule `npm run backup` nightly and copy the snapshots off the server.
+
+## 12. Two-host alternative (static SPA + separate API)
+
+This avoids the backend serving static files: host `app/dist/` on Vercel/Netlify/Cloudflare Pages and the API on a Node host.
+
+1. Build the frontend with the API origin set: `VITE_API_BASE=https://api.your-domain.com npm run build` (leave it unset for one-host).
+2. Upload `app/dist/*` to the static host. Enable an **SPA fallback**: every route that isn't a real file must return `index.html` (required for the `/trip/:id` public tracker links).
+3. Run the backend on its own host behind Caddy/nginx with the same reverse-proxy rules (proxy `/api` and `/socket.io`, allow WebSocket upgrades for live tracking).
+4. Set `CORS_ORIGINS=https://your-domain.com` in the backend `.env`.
+
+Geolocation, push, payments and PWA install all require **HTTPS** on the domain your phone opens.
+
+## 13. Notes & gotchas
+
+- The tracker page and PWA live at the same origin, so shared trip links work even
+  with the app installed.
+- Browser audio for the request chime needs a user gesture first (it primes on the
+  first tap) — do not expect sound in the background tab or phone locked.
+- Don't change `platformFeePercent` and `autoOfflineGraceMs` in code — use the
+  **Admin** tab in the driver app (writes to the fast `settings` table). Changed
+  values are picked up by the backend scheduler, so no restart needed.
+- Web push only works on HTTPS with a service worker — the frontend build wires
+  push handlers into the generated `sw.js` automatically.
+- Production OTP is a real ClickSend SMS under the surface (`123456` only in dev).
+  Keep `NODE_ENV=development` for local testing to avoid burning SMS credits.
 
 ## Troubleshooting
 

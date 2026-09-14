@@ -6,6 +6,7 @@ import Admin from '../screens/driver/Admin.jsx';
 import Analytics from '../screens/driver/Analytics.jsx';
 import Revenue from '../screens/driver/Revenue.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
+import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
 
 export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
@@ -29,26 +30,26 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <button className="link-btn" onClick={onLogout}>Log out</button>
       </header>
 
-      {showDashboard && <Dashboard user={user} onUserUpdate={setUser} />}
+      {showDashboard && <ErrorBoundary resetKey="dashboard"><Dashboard user={user} onUserUpdate={setUser} /></ErrorBoundary>}
 
       <div style={{ display: view === 'trips' ? undefined : 'none' }}>
-        <Trips />
+        <ErrorBoundary resetKey="trips"><Trips /></ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'analytics' ? undefined : 'none' }}>
-        <Analytics />
+        <ErrorBoundary resetKey="analytics"><Analytics /></ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'revenue' ? undefined : 'none' }}>
-        <Revenue />
+        <ErrorBoundary resetKey="revenue"><Revenue /></ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'profile' ? undefined : 'none' }}>
-        <Profile user={user} onUserUpdate={setUser} />
+        <ErrorBoundary resetKey="profile"><Profile user={user} onUserUpdate={setUser} /></ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'admin' ? undefined : 'none' }}>
-        <Admin />
+        <ErrorBoundary resetKey="admin"><Admin /></ErrorBoundary>
       </div>
 
       <nav className="bottom-nav">
