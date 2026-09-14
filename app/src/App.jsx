@@ -3,11 +3,12 @@ import Landing from './screens/Landing.jsx';
 import Login from './screens/Login.jsx';
 import DriverShell from './shells/DriverShell.jsx';
 import CustomerShell from './shells/CustomerShell.jsx';
+import DriverApply from './screens/driver/Apply.jsx';
 import TripTracker from './screens/track/TripTracker.jsx';
 import PWAInstallPrompt from './components/PWAInstallPrompt.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { LangProvider } from './i18n.jsx';
-import { getToken, getStoredUser, isDriverUser, clearSession, api } from './api.js';
+import { getToken, getStoredUser, isDriverUser, isApprovedDriver, isAdminUser, clearSession, api } from './api.js';
 
 // A shared trip link is /trip/<id> — the tracker is a standalone public page
 // that works without logging in, so the tracker takes priority over everything.
@@ -88,15 +89,22 @@ export default function App() {
     );
   }
 
-  const shared = { user, setUser, onLogout: handleLogout, onSwitchRole: switchRole };
+  const shared = { user, setUser, onUserUpdate: setUser, onLogout: handleLogout, onSwitchRole: switchRole };
+
+  // A driver account that hasn't been approved yet sees the application/status
+  // screen instead of the operational driver dashboard. The admin owner is
+  // always approved, so they go straight to the driver shell.
+  const driverPending = isDriverUser(user) && !isApprovedDriver(user) && !isAdminUser(user);
 
   return (
     <LangProvider>
       <PWAInstallPrompt />
       <ErrorBoundary resetKey={role} onReset={handleLogout}>
-        {role === 'driver'
-          ? <DriverShell {...shared} />
-          : <CustomerShell {...shared} />}
+        {driverPending
+          ? <DriverApply {...shared} />
+          : role === 'driver'
+            ? <DriverShell {...shared} />
+            : <CustomerShell {...shared} />}
       </ErrorBoundary>
     </LangProvider>
   );

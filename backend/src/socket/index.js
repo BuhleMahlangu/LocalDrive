@@ -105,9 +105,14 @@ function initSocket(httpServer, corsOrigins) {
     // A fresh connection means the driver is back — cancel any pending offline.
     clearOfflineTimer(id);
 
+    // Can this user act as a driver (admin owner or approved/vetted driver)?
+    const isActiveDriver = () => socket.user.role === 'admin'
+      || (socket.user.role === 'driver'
+        && (socket.user.driverStatus === 'approved' || socket.user.driverStatus == null));
+
     // Driver: publish GPS every few seconds.
     socket.on('driver:location', (payload) => {
-      if (role !== 'driver') return;
+      if (!isActiveDriver()) return;
       // Driver is alive and streaming — no auto-offline.
       clearOfflineTimer(id);
       const { lat, lng, heading, accuracy } = payload || {};
@@ -137,7 +142,7 @@ function initSocket(httpServer, corsOrigins) {
 
     // Driver goes online/offline.
     socket.on('driver:online', (isOnline) => {
-      if (role !== 'driver') return;
+      if (!isActiveDriver()) return;
       repo.setDriverOnline(id, !!isOnline);
       io.emit('driver:status:update', { driverId: id, isOnline: !!isOnline });
       if (isOnline) clearOfflineTimer(id);
@@ -145,7 +150,7 @@ function initSocket(httpServer, corsOrigins) {
 
     // Driver accepts/declines a requested trip.
     socket.on('trip:accept', (tripId) => {
-      if (role !== 'driver') return;
+      if (!isActiveDriver()) return;
       const trip = repo.getTripById(tripId);
       if (trip) {
         io.to(`user:${trip.customerId}`).emit('trip:accepted', { trip: serializeTrip(trip) });
@@ -157,7 +162,7 @@ function initSocket(httpServer, corsOrigins) {
       // Only auto-offline after the grace period — a quick reconnect (page
       // refresh, network blip, dev restart) cancels it. Skip entirely if the
       // driver has an active trip so a customer is never left stranded.
-      if (role === 'driver') scheduleAutoOffline(id);
+      if (socket.user.role === 'driver' || socket.user.role === 'admin') scheduleAutoOffline(id);
     });
   });
 

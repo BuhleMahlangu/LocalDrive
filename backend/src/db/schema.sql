@@ -9,7 +9,10 @@ CREATE TABLE IF NOT EXISTS users (
   phone         TEXT UNIQUE NOT NULL,
   name          TEXT,
   email         TEXT,
-  role          TEXT NOT NULL DEFAULT 'customer',       -- 'customer' | 'driver'
+  role          TEXT NOT NULL DEFAULT 'customer',       -- 'customer' | 'driver' | 'admin'
+  driver_status TEXT,                                   -- NULL/'approved' | 'pending' | 'rejected' | 'suspended'
+  driver_rejection_reason TEXT,
+  id_number     TEXT,
   rating_sum    INTEGER NOT NULL DEFAULT 0,
   rating_count  INTEGER NOT NULL DEFAULT 0,
   is_online     BOOLEAN NOT NULL DEFAULT false,         -- driver only
@@ -22,6 +25,27 @@ CREATE TABLE IF NOT EXISTS users (
   per_min_rate  NUMERIC NOT NULL DEFAULT 0.25,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Driver application / vetting documents (one row per driver)
+CREATE TABLE IF NOT EXISTS driver_documents (
+  driver_id            TEXT PRIMARY KEY REFERENCES users(id),
+  id_number            TEXT NOT NULL,
+  id_copy_path         TEXT,
+  selfie_path          TEXT,
+  proof_of_residence_path TEXT,
+  submitted_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reviewed_at          TIMESTAMPTZ,
+  rejection_reason     TEXT
+);
+
+-- Driver wallet ledger
+CREATE TABLE IF NOT EXISTS driver_wallets (
+  driver_id       TEXT PRIMARY KEY REFERENCES users(id),
+  available_cents INTEGER NOT NULL DEFAULT 0,
+  owed_cents      INTEGER NOT NULL DEFAULT 0,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Ephemeral driver location (last known, retained 60 min for history)

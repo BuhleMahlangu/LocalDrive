@@ -53,14 +53,17 @@ function lookupUserByPhone(normalized, role) {
 }
 
 function createUserOrReject(normalized, role, name, email) {
-  const createRole = role === 'driver' ? 'driver' : 'customer';
-  // Critical: never let a stranger register as the driver. Only the phone in
-  // config.driverPhone may create a driver account (e.g. first login from the
-  // owner's device). Everyone else gets a customer account.
-  if (createRole === 'driver' && normalized !== config.driverPhone) {
-    return null;
+  if (role === 'driver') {
+    // The platform owner (config.driverPhone) is the admin AND a driver, always
+    // pre-approved. Anyone else who registers to drive starts as 'pending' and
+    // is vetted by the admin before they can receive bookings.
+    const isOwner = normalized === config.driverPhone;
+    if (isOwner) {
+      return repo.createUser({ phone: normalized, name, email, role: 'admin', driverStatus: 'approved' });
+    }
+    return repo.createUser({ phone: normalized, name, email, role: 'driver', driverStatus: 'pending' });
   }
-  return repo.createUser({ phone: normalized, name, email, role: createRole });
+  return repo.createUser({ phone: normalized, name, email, role: 'customer' });
 }
 
 function verifyOtp({ phone, code, name, email, role }) {
@@ -96,6 +99,11 @@ function verifyOtp({ phone, code, name, email, role }) {
   if (!user) {
     user = createUserOrReject(normalized, role, name, email);
     if (!user) return { success: false, error: 'This number is not the registered driver' };
+  } else if (role === 'driver' && user.role === 'customer') {
+    // A customer choosing "I'm the driver" applies to drive. Their account is
+    // converted to a pending driver applicant; nothing is deleted, so any old
+    // ride history stays on the same id.
+    user = repo.convertToDriverApplicant(user.id);
   }
 
   const token = jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpires });

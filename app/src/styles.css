@@ -408,6 +408,9 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 
 /* ================================ Driver ================================= */
 .driver-app { background: linear-gradient(180deg, var(--driver-soft) 0%, var(--bg) 26%); }
+.driver-card { margin-bottom: 12px; }
+.driver-card .link-btn { margin-right: 12px; color: var(--driver); }
+.file-inputs { display: grid; gap: 4px; }
 .online-panel {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow);

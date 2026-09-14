@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS users (
   name          TEXT,
   email         TEXT,
   role          TEXT NOT NULL DEFAULT 'customer',
+  -- role: 'customer' | 'driver' | 'admin'  (admin = platform owner, also a driver)
+  -- driver_status: NULL/approved = can drive; pending = awaiting vetting;
+  -- rejected = application declined; suspended = removed from the platform.
+  driver_status TEXT,
+  driver_rejection_reason TEXT,
+  id_number     TEXT,
   rating_sum    INTEGER NOT NULL DEFAULT 0,
   rating_count  INTEGER NOT NULL DEFAULT 0,
   is_online     INTEGER NOT NULL DEFAULT 0,
@@ -42,6 +48,28 @@ CREATE TABLE IF NOT EXISTS users (
   per_min_rate  REAL NOT NULL DEFAULT 0.25,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Driver application / vetting documents (one row per driver).
+CREATE TABLE IF NOT EXISTS driver_documents (
+  driver_id            TEXT PRIMARY KEY,
+  id_number            TEXT NOT NULL,
+  id_copy_path         TEXT,
+  selfie_path          TEXT,
+  proof_of_residence_path TEXT,
+  submitted_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at          TEXT,
+  rejection_reason     TEXT
+);
+
+-- Driver wallet ledger. available = money the driver can withdraw; owed = the
+-- platform's commission on cash trips, to be settled by the driver.
+CREATE TABLE IF NOT EXISTS driver_wallets (
+  driver_id       TEXT PRIMARY KEY,
+  available_cents INTEGER NOT NULL DEFAULT 0,
+  owed_cents      INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS driver_locations (
@@ -214,6 +242,54 @@ CREATE TABLE IF NOT EXISTS recent_destinations (
   ensureColumn('trips', 'arrived_at', 'TEXT');
   ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
   ensureColumn('payments', 'redirect_url', 'TEXT');
+
+  // ---- Multi-driver platform migrations ----
+  ensureColumn('users', 'driver_status', 'TEXT');
+  ensureColumn('users', 'driver_rejection_reason', 'TEXT');
+  ensureColumn('users', 'id_number', 'TEXT');
+
+  // Legacy single-driver databases: the owner phone becomes the platform admin
+  // (who also drives), and any pre-existing driver row counts as already vetted.
+  if (config.driverPhone) {
+    sqliteDb.prepare(
+      `UPDATE users SET role = 'admin',
+         driver_status = COALESCE(driver_status, 'approved'),
+         updated_at = datetime('now')
+       WHERE phone = ? AND role = 'driver'`,
+    ).run(config.driverPhone);
+  }
+  sqliteDb.prepare(
+    "UPDATE users SET driver_status = 'approved' WHERE role = 'driver' AND driver_status IS NULL",
+  ).run();
+
+  sqliteDb.exec(`
+  CREATE TABLE IF NOT EXISTS driver_documents (
+    driver_id            TEXT PRIMARY KEY,
+    id_number            TEXT NOT NULL,
+    id_copy_path         TEXT,
+    selfie_path          TEXT,
+    proof_of_residence_path TEXT,
+    submitted_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at          TEXT,
+    rejection_reason     TEXT
+  );
+  CREATE TABLE IF NOT EXISTS driver_wallets (
+    driver_id       TEXT PRIMARY KEY,
+    available_cents INTEGER NOT NULL DEFAULT 0,
+    owed_cents      INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  `);
+
+  // Give every approved driver (and the admin owner) a wallet row.
+  {
+    const approved = sqliteDb.prepare(
+      "SELECT id FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved'",
+    ).all();
+    const ensureWallet = sqliteDb.prepare('INSERT OR IGNORE INTO driver_wallets (driver_id) VALUES (?)');
+    for (const d of approved) ensureWallet.run(d.id);
+  }
 
   // ---- Ensure new tables exist for older databases ----
   sqliteDb.exec(`

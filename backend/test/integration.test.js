@@ -90,6 +90,15 @@ function ensureDriver() {
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 
+// A separate admin account for testing the owner-only endpoints.
+function ensureAdmin() {
+  let admin = repo.getUserByPhone('+27828880000', 'admin');
+  if (!admin) {
+    admin = repo.createUser({ phone: '+27828880000', name: 'Owner', email: 'o@x.za', role: 'admin' });
+  }
+  return { token: signToken({ id: admin.id, role: 'admin' }), user: admin };
+}
+
 test('GET /health reports ok with service info', async () => {
   const res = await fetch(`${BASE}/health`);
   assert.equal(res.status, 200);
@@ -126,7 +135,7 @@ test('auth: /auth/me returns the signed-in user', async () => {
   assert.equal(me.json.phone, user.phone);
 });
 
-test('auth: a stranger cannot become the driver', async () => {
+test('auth: a stranger can apply as a driver (pending)', async () => {
   const req = await api('POST', '/api/auth/otp/request', { phone: '+27829999999', role: 'driver' });
   assert.equal(req.status, 200);
   const normalized = '+27829999999';
@@ -134,8 +143,9 @@ test('auth: a stranger cannot become the driver', async () => {
   const res = await api('POST', '/api/auth/otp/verify', {
     phone: normalized, code: row.code, role: 'driver',
   });
-  assert.equal(res.status, 401);
-  assert.match(res.json.error, /not the registered driver/i);
+  assert.equal(res.status, 200);
+  assert.equal(res.json.user.role, 'driver');
+  assert.equal(res.json.user.driverStatus, 'pending');
 });
 
 test('customer saved places CRUD', async () => {
@@ -328,4 +338,99 @@ test('driver-only routes reject a customer token', async () => {
   const customer = await login('+27730005555', 'customer', 'Lerato', 'l@x.za');
   const res = await api('GET', '/api/driver/pending-trip', null, customer.token);
   assert.equal(res.status, 403);
+});
+
+test('driver onboarding + admin approval/rejection over HTTP', async () => {
+  const admin = ensureAdmin();
+
+  // A stranger signs up as a driver and submits vetting documents.
+  const applicant = await login('+27829998888', 'driver', 'Nomsa', 'n@x.za');
+  assert.equal(applicant.user.driverStatus, 'pending');
+
+  const fd = new FormData();
+  fd.append('idNumber', '9001015800088');
+  fd.append('idCopy', new Blob(['fake-id-jpeg'], { type: 'image/jpeg' }), 'id.jpg');
+  fd.append('selfie', new Blob(['fake-selfie-png'], { type: 'image/png' }), 'selfie.png');
+  fd.append('proofOfResidence', new Blob(['fake-po-pdf'], { type: 'application/pdf' }), 'po.pdf');
+
+  const reg = await fetch(`${BASE}/api/driver/register`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${applicant.token}` },
+    body: fd,
+  });
+  const regJson = await reg.json();
+  assert.equal(reg.status, 201, JSON.stringify(regJson));
+  assert.equal(regJson.application.idNumber, '9001015800088');
+  assert.ok(regJson.application.idCopyUrl, 'id copy stored');
+  assert.equal(regJson.driverStatus, 'pending');
+
+  // A pending driver cannot go online or use operational driver routes.
+  const online = await api('POST', '/api/driver/online', { isOnline: true }, applicant.token);
+  assert.equal(online.status, 403);
+
+  // The pending applicant sees their own status.
+  const app = await api('GET', '/api/driver/application', null, applicant.token);
+  assert.equal(app.status, 200);
+  assert.equal(app.json.driverStatus, 'pending');
+
+  // Only an admin can see applications and approve them.
+  const forbidden = await api('GET', '/api/admin/drivers', null, applicant.token);
+  assert.equal(forbidden.status, 403);
+
+  const list = await api('GET', '/api/admin/drivers', null, admin.token);
+  assert.equal(list.status, 200);
+  const entry = list.json.drivers.find((d) => d.user.id === applicant.user.id);
+  assert.ok(entry, 'applicant visible to admin');
+  assert.equal(entry.user.driverStatus, 'pending');
+  assert.ok(entry.application.idNumber);
+
+  const approve = await api('POST', `/api/admin/drivers/${applicant.user.id}/approve`, null, admin.token);
+  assert.equal(approve.status, 200);
+  assert.equal(approve.json.driver.status === 'approved' || approve.json.driver.driverStatus === 'approved', true);
+  assert.ok(approve.json.wallet, 'wallet created on approval');
+
+  // Approved driver can now go online.
+  const onlineOk = await api('POST', '/api/driver/online', { isOnline: true }, applicant.token);
+  assert.equal(onlineOk.status, 200);
+  assert.equal(onlineOk.json.isOnline, true);
+  const wallet = await api('GET', '/api/driver/wallet', null, applicant.token);
+  assert.equal(wallet.status, 200);
+  assert.equal(wallet.json.wallet.availableCents, 0);
+
+  // Rejection flow for a second applicant.
+  const rejected = await login('+27829997777', 'driver', 'Bheki', 'b@x.za');
+  const fd2 = new FormData();
+  fd2.append('idNumber', '9110105800088');
+  fd2.append('selfie', new Blob(['fake-png'], { type: 'image/png' }), 'selfie.png');
+  await fetch(`${BASE}/api/driver/register`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${rejected.token}` },
+    body: fd2,
+  });
+  const rej = await api('POST', `/api/admin/drivers/${rejected.user.id}/reject`, { reason: 'Documents unreadable' }, admin.token);
+  assert.equal(rej.status, 200);
+  assert.equal(rej.json.driver.driverStatus, 'rejected');
+  assert.equal(rej.json.driver.rejectionReason, 'Documents unreadable');
+  const myApp = await api('GET', '/api/driver/application', null, rejected.token);
+  assert.equal(myApp.json.driverStatus, 'rejected');
+  assert.equal(myApp.json.rejectionReason, 'Documents unreadable');
+
+  // A pending driver who has not submitted documents cannot be approved.
+  const noDocs = await login('+27829996666', 'driver', 'Mpho', 'm@x.za');
+  assert.equal(noDocs.user.driverStatus, 'pending');
+  const noApprove = await api('POST', `/api/admin/drivers/${noDocs.user.id}/approve`, null, admin.token);
+  assert.equal(noApprove.status, 409);
+  assert.ok(String(noApprove.json.error).toLowerCase().includes('documents'), 'explains why');
+
+  // A bad SA ID is rejected at submission time.
+  const badId = await login('+27829995555', 'driver', 'Zanele', 'z@x.za');
+  const fdBad = new FormData();
+  fdBad.append('idNumber', '9001015800082'); // wrong check digit
+  fdBad.append('selfie', new Blob(['fake-png'], { type: 'image/png' }), 'selfie.png');
+  const badReg = await fetch(`${BASE}/api/driver/register`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${badId.token}` },
+    body: fdBad,
+  });
+  assert.equal(badReg.status, 400, 'invalid SA ID rejected');
 });

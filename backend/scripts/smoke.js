@@ -35,7 +35,7 @@ async function main() {
 
   console.log('\n[1] Driver goes online');
   const driver = await login('+27000000000', 'driver', 'Thabo', 'd@x.za');
-  assert(driver.status === 200 && driver.json.user.role === 'driver', 'driver OTP verify');
+  assert(driver.status === 200 && ['admin', 'driver'].includes(driver.json.user.role), 'driver OTP verify');
   const driverToken = driver.json.token;
 
   const online = await api('POST', '/api/driver/online', { isOnline: true }, driverToken);

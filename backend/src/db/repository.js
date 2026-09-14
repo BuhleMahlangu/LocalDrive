@@ -11,6 +11,9 @@ function mapUser(row) {
     name: row.name,
     email: row.email,
     role: row.role,
+    driverStatus: row.driver_status,
+    idNumber: row.id_number,
+    rejectionReason: row.driver_rejection_reason,
     rating: row.rating_count > 0 ? round(row.rating_sum / row.rating_count) : null,
     ratingCount: row.rating_count,
     isOnline: !!row.is_online,
@@ -126,11 +129,12 @@ module.exports = {
   mapSpot,
 
   // ---------- Users ----------
-  createUser({ phone, name, email, role }) {
+  createUser({ phone, name, email, role, driverStatus }) {
     const id = uid('u');
+    const status = driverStatus || (role === 'admin' ? 'approved' : role === 'driver' ? 'approved' : null);
     db.prepare(
-      'INSERT INTO users (id, phone, name, email, role) VALUES (?, ?, ?, ?, ?)',
-    ).run(id, phone, name || null, email || null, role || 'customer');
+      'INSERT INTO users (id, phone, name, email, role, driver_status) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(id, phone, name || null, email || null, role || 'customer', status);
     return this.getUserById(id);
   },
 
@@ -146,16 +150,23 @@ module.exports = {
   },
 
   getDriver() {
-    // The owner driver is identified by phone (config.driverPhone), falling
-    // back to the oldest driver account for legacy databases.
-    const byPhone = db.prepare('SELECT * FROM users WHERE role = ? AND phone = ?').get('driver', config.driverPhone);
-    const row = byPhone || db.prepare("SELECT * FROM users WHERE role = 'driver' ORDER BY created_at LIMIT 1").get();
+    // Primary driver for the current single-driver dispatch: the admin owner by
+    // phone, falling back to the oldest active (approved) driver account so
+    // legacy databases and tests keep working.
+    const owner = config.driverPhone
+      ? db.prepare("SELECT * FROM users WHERE role = 'admin' AND phone = ?").get(config.driverPhone)
+      : null;
+    const row = owner || db.prepare(
+      "SELECT * FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved' ORDER BY created_at LIMIT 1",
+    ).get();
     return mapUser(row);
   },
 
   getAllOnlineDrivers() {
     return db
-      .prepare("SELECT * FROM users WHERE role = 'driver' AND is_online = 1")
+      .prepare(
+        "SELECT * FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved' AND is_online = 1",
+      )
       .all()
       .map(mapUser);
   },
@@ -188,13 +199,137 @@ module.exports = {
   },
 
   promoteToDriver(id) {
-    db.prepare("UPDATE users SET role = 'driver', is_online = 0, updated_at = ? WHERE id = ?").run(now(), id);
+    db.prepare(
+      "UPDATE users SET role = 'driver', driver_status = 'approved', is_online = 0, updated_at = ? WHERE id = ?",
+    ).run(now(), id);
+    return this.getUserById(id);
+  },
+
+  // A customer who chooses "I'm the driver" applies to drive: keep the same row
+  // (and history) but the role becomes a pending driver applicant.
+  convertToDriverApplicant(id) {
+    db.prepare(
+      "UPDATE users SET role = 'driver', driver_status = 'pending', is_online = 0, updated_at = ? WHERE id = ?",
+    ).run(now(), id);
+    return this.getUserById(id);
+  },
+
+  // Promote an existing account (e.g. the owner's) to the admin role/driver.
+  promoteToAdmin(id) {
+    db.prepare(
+      "UPDATE users SET role = 'admin', driver_status = 'approved', is_online = 0, updated_at = ? WHERE id = ?",
+    ).run(now(), id);
     return this.getUserById(id);
   },
 
   addRating(id, stars) {
     db.prepare('UPDATE users SET rating_sum = rating_sum + ?, rating_count = rating_count + 1, updated_at = ? WHERE id = ?')
       .run(stars, now(), id);
+  },
+
+  // ---------- Driver applications & vetting ----------
+  mapApplication(row) {
+    if (!row) return null;
+    return {
+      driverId: row.driver_id,
+      idNumber: row.id_number,
+      idCopyUrl: row.id_copy_path ? `/api/uploads/${row.id_copy_path}` : null,
+      selfieUrl: row.selfie_path ? `/api/uploads/${row.selfie_path}` : null,
+      proofOfResidenceUrl: row.proof_of_residence_path ? `/api/uploads/${row.proof_of_residence_path}` : null,
+      submittedAt: row.submitted_at,
+      reviewedAt: row.reviewed_at,
+      rejectionReason: row.rejection_reason,
+    };
+  },
+
+  saveDriverApplication(driverId, { idNumber, idCopyPath, selfiePath, proofOfResidencePath }) {
+    db.prepare(
+      `INSERT INTO driver_documents (driver_id, id_number, id_copy_path, selfie_path, proof_of_residence_path, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(driver_id) DO UPDATE SET
+         id_number = excluded.id_number,
+         id_copy_path = COALESCE(excluded.id_copy_path, driver_documents.id_copy_path),
+         selfie_path = COALESCE(excluded.selfie_path, driver_documents.selfie_path),
+         proof_of_residence_path = COALESCE(excluded.proof_of_residence_path, driver_documents.proof_of_residence_path),
+         updated_at = excluded.updated_at,
+         reviewed_at = NULL,
+         rejection_reason = NULL`,
+    ).run(
+      driverId,
+      idNumber,
+      idCopyPath || null,
+      selfiePath || null,
+      proofOfResidencePath || null,
+      now(),
+    );
+    return this.getDriverApplication(driverId);
+  },
+
+  getDriverApplication(driverId) {
+    return this.mapApplication(
+      db.prepare('SELECT * FROM driver_documents WHERE driver_id = ?').get(driverId),
+    );
+  },
+
+  listDriverApplications() {
+    return db.prepare(
+      'SELECT * FROM driver_documents ORDER BY submitted_at DESC',
+    ).all().map((r) => this.mapApplication(r));
+  },
+
+  // Build the full admin-facing driver record: account + application + wallet.
+  listDriversForAdmin() {
+    const rows = db.prepare(
+      `SELECT u.*, w.available_cents, w.owed_cents
+       FROM users u
+       LEFT JOIN driver_wallets w ON w.driver_id = u.id
+       WHERE u.role IN ('admin','driver')
+       ORDER BY CASE u.driver_status
+         WHEN 'pending' THEN 0 WHEN 'rejected' THEN 1 ELSE 2 END ASC, u.created_at ASC`,
+    ).all();
+    return rows.map((row) => {
+      const app = this.getDriverApplication(row.id);
+      return {
+        user: mapUser(row),
+        application: app,
+        wallet: {
+          availableCents: row.available_cents || 0,
+          owedCents: row.owed_cents || 0,
+        },
+      };
+    });
+  },
+
+  setDriverStatus(id, status, rejectionReason) {
+    db.prepare(
+      `UPDATE users SET driver_status = ?, driver_rejection_reason = ?, updated_at = ? WHERE id = ?`,
+    ).run(status || null, rejectionReason || null, now(), id);
+    if (status === 'approved') this.createWalletIfMissing(id);
+    return this.getUserById(id);
+  },
+
+  // ---------- Driver wallets ----------
+  createWalletIfMissing(driverId) {
+    db.prepare('INSERT OR IGNORE INTO driver_wallets (driver_id) VALUES (?)').run(driverId);
+    return this.getWallet(driverId);
+  },
+
+  getWallet(driverId) {
+    const row = db.prepare(
+      'SELECT available_cents, owed_cents, updated_at FROM driver_wallets WHERE driver_id = ?',
+    ).get(driverId);
+    return row
+      ? { availableCents: row.available_cents, owedCents: row.owed_cents, updatedAt: row.updated_at }
+      : { availableCents: 0, owedCents: 0, updatedAt: null };
+  },
+
+  // Move given driver_id's wallet by deltas (cents, can be negative).
+  adjustWallet(driverId, { availableCents = 0, owedCents = 0 }) {
+    db.prepare(
+      `UPDATE driver_wallets SET available_cents = available_cents + ?,
+        owed_cents = owed_cents + ?, updated_at = ? WHERE driver_id = ?`,
+    ).run(availableCents, owedCents, now(), driverId);
+    return this.getWallet(driverId);
   },
 
   // ---------- Driver location ----------

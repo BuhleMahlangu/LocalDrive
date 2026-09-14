@@ -8,6 +8,7 @@ import Revenue from '../screens/driver/Revenue.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
+import { isAdminUser } from '../api.js';
 
 export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   const [view, setView] = useState('dashboard');
@@ -17,6 +18,7 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   // and stay mounted (hidden via CSS) so switching between them never rebuilds
   // them (which re-fired API calls and replayed mount animations -> flicker).
   const showDashboard = view === 'dashboard';
+  const hasAdmin = isAdminUser(user);
 
   return (
     <div className="app driver-app">
@@ -65,9 +67,11 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')}>
           <Icon name="coins" className="nav-icon" /> Revenue
         </button>
-        <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')}>
-          <Icon name="gear" className="nav-icon" /> Admin
-        </button>
+        {hasAdmin && (
+          <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')}>
+            <Icon name="gear" className="nav-icon" /> Admin
+          </button>
+        )}
         <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')}>
           <Icon name="profile" className="nav-icon" /> Profile
         </button>

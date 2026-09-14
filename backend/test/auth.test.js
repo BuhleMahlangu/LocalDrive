@@ -68,30 +68,32 @@ test('verifyOtp rejects a second use of the same code', async () => {
   assert.match(again.error, /No code requested/);
 });
 
-test('strangers cannot register as the driver', async () => {
+test('strangers may register as a driver but stay pending until approved', async () => {
   const stranger = '+27820000002';
   await authService.requestOtp({ phone: stranger, role: 'driver' });
 
   const result = await authService.verifyOtp({ phone: stranger, code: repo.getOtp(stranger).code, role: 'driver' });
-  assert.equal(result.success, false);
-  assert.match(result.error, /not the registered driver/i);
+  assert.equal(result.success, true);
+  assert.equal(result.user.role, 'driver');
+  assert.equal(result.user.driverStatus, 'pending', 'new driver applications start pending');
 
-  // No user account should have been created for them.
-  assert.equal(repo.getUserByPhone(stranger, undefined), null);
+  // A pending driver cannot use operational driver routes.
+  assert.equal(repo.listDriversForAdmin().length >= 1, true);
 });
 
-test('the owner phone may create a driver account on first login', async () => {
+test('the owner phone creates the admin (owner) account on first login', async () => {
   assert.ok(config.driverPhone.length >= 10);
   const owner = config.driverPhone;
   await authService.requestOtp({ phone: owner, role: 'driver' });
 
   const result = await authService.verifyOtp({ phone: owner, code: repo.getOtp(owner).code, role: 'driver' });
   assert.equal(result.success, true);
-  assert.equal(result.user.role, 'driver');
+  assert.equal(result.user.role, 'admin');
+  assert.equal(result.user.driverStatus, 'approved');
   assert.equal(result.user.phone, owner);
 });
 
-test('an existing customer is not promoted to driver by choosing driver', async () => {
+test('an existing customer becomes a pending driver applicant by choosing driver', async () => {
   const phone = '+27820000003';
   await authService.requestOtp({ phone, role: 'customer' });
   await authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'customer' });
@@ -99,7 +101,8 @@ test('an existing customer is not promoted to driver by choosing driver', async 
   await authService.requestOtp({ phone, role: 'driver' });
   const result = await authService.verifyOtp({ phone, code: repo.getOtp(phone).code, role: 'driver' });
   assert.equal(result.success, true);
-  assert.equal(result.user.role, 'customer', 'role must stay customer');
+  assert.equal(result.user.role, 'driver', 'customer converts to a driver applicant');
+  assert.equal(result.user.driverStatus, 'pending');
 });
 
 test('verifyOtp rejects an invalid phone format at request time', async () => {

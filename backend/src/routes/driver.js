@@ -1,15 +1,95 @@
 const { Router } = require('express');
 const repo = require('../db/repository');
 const config = require('../config');
-const { authRequired, ownerDriverOnly } = require('../middleware');
+const { authRequired, approvedDriverOnly } = require('../middleware');
 const tripService = require('../services/trips');
 const payments = require('../services/payments');
 const pricing = require('../services/pricing');
+const uploadsService = require('../services/uploads');
 
 function driverRoutes({ notify }) {
   const router = Router();
-  router.use(authRequired(['driver']));
-  router.use(ownerDriverOnly);
+  // Any authenticated user may reach the application endpoints below; the
+  // operational driver routes after them require an approved driver.
+  router.use(authRequired());
+
+  // --- Driver application / vetting (also usable while pending/rejected) ---
+
+  // The current user's application + approval status.
+  router.get('/application', (req, res) => {
+    const app = repo.getDriverApplication(req.user.id);
+    const user = repo.getUserById(req.user.id);
+    res.json({
+      role: user.role,
+      driverStatus: user.driverStatus,
+      rejectionReason: user.rejectionReason,
+      application: app,
+    });
+  });
+
+  // Submit (or re-submit) a driver application with vetting documents:
+  // FormData: idNumber (text) + idCopy, selfie, proofOfResidence (files).
+  router.post(
+    '/register',
+    uploadsService.upload.fields([
+      { name: 'idCopy', maxCount: 1 },
+      { name: 'selfie', maxCount: 1 },
+      { name: 'proofOfResidence', maxCount: 1 },
+    ]),
+    (req, res, next) => {
+      try {
+        if (!['driver', 'admin'].includes(req.user.role)) {
+          return res.status(403).json({ error: 'Only drivers can apply' });
+        }
+        const { idNumber } = req.body || {};
+        if (!idNumber || !require('../services/saidNumber').isValidSaId(idNumber)) {
+          return res.status(400).json({ error: 'A valid 13-digit SA ID number is required' });
+        }
+        const files = req.files || {};
+        const pick = (name) => (files[name] && files[name][0] ? files[name][0].filename : null);
+
+        // A re-submission may omit unchanged documents; keep the existing paths.
+        const existing = repo.getDriverApplication(req.user.id);
+        const idCopyPath = pick('idCopy') || existing?.idCopyUrl?.split('/').pop() || null;
+        const selfiePath = pick('selfie') || existing?.selfieUrl?.split('/').pop() || null;
+        const proofPath = pick('proofOfResidence') || existing?.proofOfResidenceUrl?.split('/').pop() || null;
+
+        const app = repo.saveDriverApplication(req.user.id, {
+          idNumber: String(idNumber).trim(),
+          idCopyPath,
+          selfiePath,
+          proofOfResidencePath: proofPath,
+        });
+
+        // Replaced documents are gone for good — remove the old copies from disk.
+        try {
+          const previous = [existing?.idCopyUrl, existing?.selfieUrl, existing?.proofOfResidenceUrl];
+          const current = [idCopyPath, selfiePath, proofPath];
+          previous.forEach((oldUrl, i) => {
+            if (oldUrl && current[i] && !oldUrl.endsWith(current[i])) {
+              uploadsService.deleteFile(oldUrl.split('/').pop());
+            }
+          });
+        } catch { /* best-effort cleanup */ }
+
+        // Only pending/rejected applicants change status; approved/admin stay put.
+        if (req.user.driverStatus !== 'approved' && req.user.role !== 'admin') {
+          repo.setDriverStatus(req.user.id, 'pending');
+        }
+        const user = repo.getUserById(req.user.id);
+        res.status(201).json({ application: app, driverStatus: user.driverStatus, user });
+      } catch (e) { next(e); }
+    },
+  );
+
+  // --- Operational driver routes: approved drivers only ---
+  router.use(authRequired(['driver', 'admin']));
+  router.use(approvedDriverOnly);
+
+  // Wallet balance (available to withdraw vs commission owed to the platform).
+  router.get('/wallet', (req, res) => {
+    res.json({ wallet: repo.getWallet(req.user.id) });
+  });
 
   // Update driver profile / rates.
   router.put('/profile', (req, res, next) => {

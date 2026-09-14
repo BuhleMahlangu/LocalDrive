@@ -2,20 +2,21 @@
 const repo = require('../db/repository');
 
 function main() {
-  const driverPhone = process.env.SEED_DRIVER_PHONE || '+27000000000';
+  const adminPhone = process.env.SEED_DRIVER_PHONE || '+27000000000';
   const customerPhone = process.env.SEED_CUSTOMER_PHONE || '+27730002222';
 
-  // The driver phone may already exist as a customer (single phone/row model).
-  let driver = repo.getUserByPhone(driverPhone, undefined);
+  // The admin/owner phone may already exist as a customer (single phone/row model).
+  let driver = repo.getUserByPhone(adminPhone, undefined);
   if (!driver) {
     driver = repo.createUser({
-      phone: driverPhone,
+      phone: adminPhone,
       name: 'Thabo Driver',
       email: 'driver@drivelocal.co.za',
-      role: 'driver',
+      role: 'admin',
+      driverStatus: 'approved',
     });
-  } else if (driver.role !== 'driver') {
-    repo.promoteToDriver(driver.id);
+  } else if (driver.role !== 'admin') {
+    repo.promoteToAdmin(driver.id);
     driver = repo.updateUserProfile(driver.id, {
       name: driver.name || 'Thabo Driver',
       email: driver.email || 'driver@drivelocal.co.za',
@@ -29,7 +30,8 @@ function main() {
     per_min_rate: 2.5,
     service_radius_km: 50,
   });
-  console.log(`Driver ready: ${driverPhone} (${driver.role})`);
+  repo.createWalletIfMissing(driver.id);
+  console.log(`Driver ready: ${adminPhone} (${driver.role})`);
 
   let customer = repo.getUserByPhone(customerPhone, 'customer');
   if (!customer) {
@@ -53,7 +55,7 @@ function main() {
   }
 
   console.log('\nSeeded demo accounts:');
-  console.log(`  Driver   -> ${driverPhone} (passwordless, OTP by SMS / console in dev)`);
+  console.log(`  Driver   -> ${adminPhone} (passwordless, OTP by SMS / console in dev)`);
   console.log(`  Customer -> ${customerPhone}`);
   console.log('\nRates: base R25.00, R12.00/km, R2.50/min, currency ZAR.');
 }

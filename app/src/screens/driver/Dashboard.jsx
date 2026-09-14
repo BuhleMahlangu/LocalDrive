@@ -12,6 +12,7 @@ export default function Dashboard({ user, onUserUpdate }) {
   const [pending, setPending] = useState(null);
   const [active, setActive] = useState(null);
   const [earnings, setEarnings] = useState(null);
+  const [wallet, setWallet] = useState(null);
   const [scheduled, setScheduled] = useState([]);
   const [spots, setSpots] = useState([]);
   const [driverLoc, setDriverLoc] = useState(null);
@@ -96,6 +97,7 @@ export default function Dashboard({ user, onUserUpdate }) {
       }
     }).catch(() => {});
     api('/driver/earnings').then(setEarnings).catch(() => {});
+    api('/driver/wallet').then((r) => setWallet(r.wallet)).catch(() => {});
     api('/driver/scheduled-trips').then((r) => setScheduled(Array.isArray(r.trips) ? r.trips : [])).catch(() => {});
   }, [surfaceRequest]);
 
@@ -628,6 +630,17 @@ export default function Dashboard({ user, onUserUpdate }) {
         </div>
       ) : (
         <Skeleton card lines={4} />
+      )}
+
+      {wallet && (
+        <div className="card earnings">
+          <h3>Wallet</h3>
+          <div className="earn-row">
+            <div className="earn-box"><span className="earn-num">{formatRand((wallet.availableCents || 0) / 100)}</span><span className="earn-label">Ready to withdraw</span></div>
+            <div className="earn-box"><span className="earn-num">{formatRand((wallet.owedCents || 0) / 100)}</span><span className="earn-label">Owed to platform</span></div>
+          </div>
+          <p className="hint">Card trips pay into this wallet; cash trips add a platform fee you owe. Payouts are coming soon.</p>
+        </div>
       )}
     </div>
   );
