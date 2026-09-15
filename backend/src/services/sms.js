@@ -55,8 +55,20 @@ class SmsProvider {
       throw new Error(`ClickSend send failed: ${msg}`);
     }
 
+    // ClickSend returns envelope SUCCESS even when individual messages are not
+    // queued (e.g. INSUFFICIENT_CREDIT, REJECTED). The real outcome is per
+    // message: queued_count tells us whether delivery was actually accepted.
+    const first = (json.data?.messages || [])[0];
+    const queued = Number.isInteger(json.data?.queued_count)
+      ? json.data.queued_count
+      : (first ? 1 : 0);
+    const perMessageStatus = String(first?.status || '').toUpperCase();
+    if (queued < 1) {
+      throw new Error(`ClickSend did not queue the message: ${perMessageStatus || `queued_count=${queued}`}`);
+    }
+
     console.log(`[sms] Queued to ${to}: ${body}`);
-    return { ok: true };
+    return { ok: true, status: perMessageStatus || 'QUEUED', messageId: first?.message_id };
   }
 }
 
