@@ -155,6 +155,7 @@ Run through this on the live URL before telling anyone:
 - [ ] **Share link** `GET /api/public/trips/<id>/live` opens without logging in.
 - [ ] **Yoco card flow** if enabled (hosted checkout → success/cancel redirect).
 - [ ] **Backup** — schedule `npm run backup` nightly and copy the snapshots off the server.
+- [ ] **Pickup spots set up** — add the preset pickup spots via the owner app's **Admin → Spots** tab (tap "Add spot", then the map; each shows as a pin to every customer and driver).
 
 ## 12. Two-host alternative (static SPA + separate API)
 
