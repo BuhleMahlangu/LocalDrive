@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Map from '../../components/Map.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
+import Chat from '../../components/Chat.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import decodePolyline from '../../lib/polyline.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
@@ -29,6 +30,7 @@ export default function Dashboard({ user, onUserUpdate }) {
   const [spotHint, setSpotHint] = useState(null);
   const [spotNames, setSpotNames] = useState({});
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const watchRef = useRef(null);
   const countdownTimer = useRef(null);
   const handledRef = useRef(new Set());
@@ -122,6 +124,7 @@ export default function Dashboard({ user, onUserUpdate }) {
   useEffect(() => {
     const socket = connectSocket();
     socketRef.current = socket;
+    setSocket(socket);
     socket.on('connect', () => {
       if (!online) return;
       // Re-emit the last known fix so the server records it on the new socket;
@@ -602,6 +605,9 @@ export default function Dashboard({ user, onUserUpdate }) {
           )}
           {active.status === 'ongoing' && (
             <button className="btn primary" onClick={() => act('complete', {})} disabled={busy}>✅ Complete trip</button>
+          )}
+          {(active.status === 'accepted' || active.status === 'ongoing') && (
+            <Chat tripId={active.id} socket={socket} label="💬 Message your customer" />
           )}
           {(active.status === 'accepted' || active.status === 'ongoing') && (
             <button className="btn danger" onClick={cancelTrip} disabled={busy} style={{ marginTop: '6px' }}>Cancel trip</button>

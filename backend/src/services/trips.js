@@ -317,7 +317,7 @@ async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
     if (payment && payment.provider === 'cash') {
       repo.updatePaymentAmount(tripId, pricing.dollarsToCents(estimate.total));
       if (payment.status !== 'succeeded') {
-const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
+        const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
         repo.markPaymentSucceeded(tripId, {
           driverPayoutCents: pricing.dollarsToCents(estimate.total) - platformFeeCents,
           platformFeeCents,

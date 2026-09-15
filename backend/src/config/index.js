@@ -64,6 +64,10 @@ if (nodeEnv === 'production') {
   if (problems.length) {
     throw new Error(`DriveLocal refuses to start in production:\n - ${problems.join('\n - ')}`);
   }
+} else if (!jwtSecret || jwtSecret === 'dev-secret-change-me') {
+  // Development convenience: keep running, but make it obvious the default secret
+  // is in use so nobody accidentally ships it to a public server.
+  console.warn('[config] ⚠ JWT_SECRET is not set — using the insecure dev default. Tokens issued now can be forged by anyone who reads the source.');
 }
 
 module.exports = config;

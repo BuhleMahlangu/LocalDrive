@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+app/dist
+backend/data
+backend/backups
+backend/.env
+.env
+*.log
+**/*.log
+backend/logs
+.git
+.github
+.vscode
+.idea
+Dockerfile
+docker-compose.yml
+Caddyfile

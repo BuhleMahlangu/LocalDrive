@@ -25,7 +25,8 @@ sms.send = async () => ({ dev: true });
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
   tripAccepted() {}, tripArrived() {}, paymentUpdated() {},
-  driverStatus() {}, onlineDriversChanged() {},
+  driverStatus() {}, onlineDriversChanged() {}, chatMessage() {},
+  chatRead() {},
 };
 
 let server;
@@ -433,4 +434,52 @@ test('driver onboarding + admin approval/rejection over HTTP', async () => {
     body: fdBad,
   });
   assert.equal(badReg.status, 400, 'invalid SA ID rejected');
+});
+
+test('in-trip chat: participants can send/read messages, strangers cannot', async () => {
+  const driver = ensureDriver();
+  await api('POST', '/api/driver/online', { isOnline: true }, driver.token);
+  const customer = await login('+27730006666', 'customer', 'Karabo', 'k@x.za');
+
+  const book = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, customer.token);
+  assert.equal(book.status, 201);
+  const tripId = book.json.trip.id;
+  await api('POST', `/api/driver/trips/${tripId}/accept`, {}, driver.token);
+
+  // Customer sends, driver reads.
+  const send = await api('POST', `/api/chat/trips/${tripId}/messages`, {
+    body: 'Hi, I am outside in a blue shirt.',
+  }, customer.token);
+  assert.equal(send.status, 201);
+  assert.equal(send.json.message.senderId, customer.user.id);
+  assert.equal(send.json.message.body, 'Hi, I am outside in a blue shirt.');
+
+  const driverView = await api('GET', `/api/chat/trips/${tripId}/messages`, null, driver.token);
+  assert.equal(driverView.status, 200);
+  assert.equal(driverView.json.messages.length, 1);
+  assert.ok(driverView.json.messages[0].readAt, 'driver reading the thread marks it read');
+
+  // Driver replies, customer reads both.
+  const reply = await api('POST', `/api/chat/trips/${tripId}/messages`, {
+    body: 'On my way, see you soon.',
+  }, driver.token);
+  assert.equal(reply.status, 201);
+
+  const customerView = await api('GET', `/api/chat/trips/${tripId}/messages`, null, customer.token);
+  assert.equal(customerView.json.messages.length, 2);
+  assert.equal(customerView.json.messages[0].body, 'Hi, I am outside in a blue shirt.');
+  assert.equal(customerView.json.messages[1].body, 'On my way, see you soon.');
+
+  // Empty messages are rejected.
+  const empty = await api('POST', `/api/chat/trips/${tripId}/messages`, { body: '   ' }, customer.token);
+  assert.equal(empty.status, 400);
+
+  // A stranger (not a participant) gets 403 on read and write.
+  const outsider = await login('+27730007777', 'customer', 'Palesa', 'p@x.za');
+  const forbidWrite = await api('POST', `/api/chat/trips/${tripId}/messages`, { body: 'hey' }, outsider.token);
+  assert.equal(forbidWrite.status, 403);
+  const forbidRead = await api('GET', `/api/chat/trips/${tripId}/messages`, null, outsider.token);
+  assert.equal(forbidRead.status, 403);
 });

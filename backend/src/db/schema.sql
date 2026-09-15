@@ -158,3 +158,14 @@ CREATE TABLE IF NOT EXISTS saved_places (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id);
+
+-- In-trip chat between customer and driver (one thread per trip).
+CREATE TABLE IF NOT EXISTS trip_messages (
+  id         TEXT PRIMARY KEY,
+  trip_id    TEXT NOT NULL REFERENCES trips(id),
+  sender_id  TEXT NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  read_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);

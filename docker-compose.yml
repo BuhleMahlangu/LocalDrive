@@ -1,0 +1,56 @@
+# DriveLocal — containerised backend + optional Caddy HTTPS front.
+#
+# Quick start (no domain, local test on http://localhost:4000):
+#   cp backend/.env.example backend/.env   # then add your real secrets
+#   docker compose up --build app
+#
+# Production (Caddy auto-provisions a Let's Encrypt certificate):
+#   1. Point your domain at this host and set APP_DOMAIN below.
+#   2. Create backend/.env per the checklist in DEPLOY.md.
+#   3. docker compose up --build  (services: `app` and `caddy`)
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DB_FILE: /data/drivelocal.sqlite
+    volumes:
+      - drivelocal-data:/data
+      - drivelocal-backups:/app/backups
+    expose:
+      - "4000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Optional reverse proxy that brings real HTTPS (no exposed ports needed on
+  # `app` if you go through Caddy). Set APP_DOMAIN to your live domain.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: "${APP_DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    profiles: ["proxy"]
+
+volumes:
+  drivelocal-data:
+  drivelocal-backups:
+  caddy-data:
+  caddy-config:

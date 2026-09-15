@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const config = require('./config');
 const authRoutes = require('./routes/auth');
+const chatRoutes = require('./routes/chat');
 const driverRoutesFactory = require('./routes/driver');
 const customerRoutesFactory = require('./routes/customer');
 const paymentsRoutes = require('./routes/payments');
@@ -41,6 +42,7 @@ function createApp({ notify }) {
 
   app.use('/api/auth', authRoutes);
   app.use('/api/push', pushRoutes);
+  app.use('/api/chat', chatRoutes({ notify }));
   app.use('/api/payments', paymentsRoutes);
   app.use('/api/pickup-spots', spotsRoutes());
   app.use('/api/public', publicRoutes());

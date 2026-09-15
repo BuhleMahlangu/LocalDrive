@@ -223,6 +223,17 @@ CREATE TABLE IF NOT EXISTS recent_destinations (
   last_used  TEXT NOT NULL DEFAULT (datetime('now')),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- In-trip chat between customer and driver (one thread per trip).
+CREATE TABLE IF NOT EXISTS trip_messages (
+  id         TEXT PRIMARY KEY,
+  trip_id    TEXT NOT NULL,
+  sender_id  TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  read_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);
 `;
 
   sqliteDb.exec(SCHEMA);
@@ -328,6 +339,15 @@ CREATE TABLE IF NOT EXISTS recent_destinations (
     last_used  TEXT NOT NULL DEFAULT (datetime('now')),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS trip_messages (
+    id         TEXT PRIMARY KEY,
+    trip_id    TEXT NOT NULL,
+    sender_id  TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    read_at    TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);
 `);
 
   // ---- Seed a demo promo code ----

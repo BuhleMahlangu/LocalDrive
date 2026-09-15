@@ -222,7 +222,8 @@ function verifyWebhookSignature(rawBody, headers) {
     throw Object.assign(new Error('Missing webhook headers'), { status: 400 });
   }
 
-  // Replay protection: reject events older than 5 minutes.
+  // Replay protection: reject events older than 5 minutes. Webhook timestamps
+  // are Unix seconds; Date.now() is ms, so we divide by 1000 before comparing.
   const ts = parseInt(timestamp, 10);
   if (Number.isNaN(ts) || Math.abs(Date.now() / 1000 - ts) > 5 * 60) {
     throw Object.assign(new Error('Webhook timestamp is invalid or expired'), { status: 400 });

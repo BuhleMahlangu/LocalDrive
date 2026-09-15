@@ -1,0 +1,12 @@
+# Caddy reverse proxy for the DriveLocal container.
+# APP_DOMAIN is set by docker-compose (defaults to localhost for local testing).
+# Caddy provisions a Let's Encrypt certificate automatically for real domains
+# and handles the Socket.io WebSocket upgrade without extra config.
+#
+# The backend container serves both the API (/api, /socket.io) and the built
+# SPA, so we reverse-proxy everything to it — exactly the one-host model that
+# DEPLOY.md describes.
+{$APP_DOMAIN} {
+    encode gzip
+    reverse_proxy app:4000
+}

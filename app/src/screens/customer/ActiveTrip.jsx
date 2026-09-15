@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Map from '../../components/Map.jsx';
+import Chat from '../../components/Chat.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 import { getEmergencyContact, setEmergencyContact, sendSos } from '../../lib/emergency.js';
@@ -47,6 +48,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [payment, setPayment] = useState(null);
   const [refunding, setRefunding] = useState(false);
   const socketRef = useRef(null);
+  const [socket, setSocket] = useState(null);
   const chimePlayedRef = useRef(false);
   const arrivedChimeRef = useRef(false);
   // SOS modal state.
@@ -72,6 +74,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
 
     const socket = connectSocket();
     socketRef.current = socket;
+    setSocket(socket);
     socket.on('trip:updated', (data) => data?.trip && setTrip(data.trip));
     socket.on('trip:accepted', (data) => {
       if (data?.trip) {
@@ -315,6 +318,10 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
 
         {(status === 'accepted' || status === 'ongoing') && (
           <button className="link-btn" onClick={shareTrip} style={{ alignSelf: 'flex-start' }}>{t('trip.share')}</button>
+        )}
+
+        {(status === 'accepted' || status === 'ongoing') && (
+          <Chat tripId={trip.id} socket={socket} />
         )}
 
         {(status === 'requested' || status === 'accepted') && (

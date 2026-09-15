@@ -865,6 +865,19 @@ input:checked + .slider:before { transform: translateX(24px); }
   margin: 6px 0 10px;
 }
 
+/* ================================ In-trip chat ================================ */
+.chat-wrap { margin-top: 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card); overflow: hidden; }
+.chat-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 0.88rem; font-weight: 750; background: var(--bg-soft); }
+.chat-list { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; overflow-y: auto; min-height: 90px; }
+.chat-bubble { max-width: 82%; border-radius: 16px; padding: 9px 12px; font-size: 0.9rem; line-height: 1.4; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); word-break: break-word; }
+.chat-bubble.mine { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+.chat-bubble.theirs { align-self: flex-start; background: var(--bg-soft); color: var(--ink); border-bottom-left-radius: 4px; }
+.chat-bubble-body { display: block; white-space: pre-wrap; }
+.chat-bubble-time { display: block; margin-top: 3px; font-size: 0.66rem; opacity: 0.72; }
+.chat-compose { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-soft); }
+.chat-compose input { flex: 1; margin: 0; }
+.chat-compose .btn { margin: 0; white-space: nowrap; }
+
 /* ============================ Accessibility =================================== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }

@@ -416,6 +416,12 @@ module.exports = {
     ).all(customerId, limit).map(mapTrip);
   },
 
+  getUpcomingTripsForCustomer(customerId) {
+    return db.prepare(
+      "SELECT * FROM trips WHERE customer_id = ? AND status = 'scheduled' ORDER BY scheduled_at ASC",
+    ).all(customerId).map(mapTrip);
+  },
+
   getTripsForDriver(driverId, limit = 50) {
     return db.prepare(
       'SELECT * FROM trips WHERE driver_id = ? ORDER BY requested_at DESC LIMIT ?',
@@ -442,6 +448,54 @@ module.exports = {
     return mapTrip(db.prepare(
       "SELECT * FROM trips WHERE status = 'requested' ORDER BY requested_at ASC LIMIT 1",
     ).get());
+  },
+
+  // ---------- In-trip chat ----------
+  mapMessage(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      tripId: row.trip_id,
+      senderId: row.sender_id,
+      body: row.body,
+      createdAt: row.created_at,
+      readAt: row.read_at,
+    };
+  },
+
+  createTripMessage({ tripId, senderId, body }) {
+    const id = uid('msg');
+    const clean = String(body).trim().slice(0, 2000);
+    db.prepare(
+      'INSERT INTO trip_messages (id, trip_id, sender_id, body) VALUES (?, ?, ?, ?)',
+    ).run(id, tripId, senderId, clean);
+    return this.getTripMessageById(id);
+  },
+
+  getTripMessageById(id) {
+    return this.mapMessage(db.prepare('SELECT * FROM trip_messages WHERE id = ?').get(id));
+  },
+
+  // Most recent `limit` messages, returned oldest-first for a chat UI.
+  getTripMessages(tripId, limit = 50) {
+    const rows = db.prepare(
+      'SELECT * FROM trip_messages WHERE trip_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?',
+    ).all(tripId, limit);
+    return rows.reverse().map((r) => this.mapMessage(r));
+  },
+
+  hasUnreadMessages(tripId, readerId) {
+    const row = db.prepare(
+      'SELECT COUNT(*) AS n FROM trip_messages WHERE trip_id = ? AND sender_id != ? AND read_at IS NULL',
+    ).get(tripId, readerId);
+    return (row && row.n) > 0;
+  },
+
+  markTripMessagesRead(tripId, readerId) {
+    db.prepare(
+      "UPDATE trip_messages SET read_at = datetime('now') WHERE trip_id = ? AND sender_id != ? AND read_at IS NULL",
+    ).run(tripId, readerId);
+    return this.getTripMessages(tripId);
   },
 
   updateTrip(id, fields) {
@@ -733,7 +787,6 @@ module.exports = {
   getDriverAnalytics(driverId) {
     const trips = db.prepare('SELECT * FROM trips WHERE driver_id = ? ORDER BY requested_at DESC').all(driverId);
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
 
     // Daily earnings for last 7 days
     const dailyEarnings = [];

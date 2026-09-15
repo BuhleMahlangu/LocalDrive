@@ -158,9 +158,7 @@ function customerRoutes({ notify }) {
 
   // My upcoming scheduled trips (pre-booked for a future time).
   router.get('/trips/upcoming', (req, res) => {
-    const trips = repo.getTripsForCustomer(req.user.id)
-      .filter((t) => t.status === 'scheduled');
-    res.json({ trips });
+    res.json({ trips: repo.getUpcomingTripsForCustomer(req.user.id) });
   });
 
   // Cancel my booking.

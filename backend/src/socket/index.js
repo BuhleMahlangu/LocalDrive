@@ -34,6 +34,9 @@ function initSocket(httpServer, corsOrigins) {
     const last = lastFixes.get(driverId);
     lastFixes.set(driverId, { lat, lng });
     if (!last) return false;
+    // A device claiming to be precise (>5km error) is reporting a junk/faked
+    // fix — drop it rather than store a location that could be anywhere.
+    if (typeof accuracy === 'number' && accuracy > 5000) return true;
     const km = geoKm(last.lat, last.lng, lat, lng);
     if (km > MAX_SPOOF_KM) {
       spoofStreak.set(driverId, (spoofStreak.get(driverId) || 0) + 1);
@@ -215,6 +218,22 @@ function initSocket(httpServer, corsOrigins) {
       if (trip.customerId) io.to(`user:${trip.customerId}`).emit('payment:updated', payload);
       if (trip.driverId) io.to(`user:${trip.driverId}`).emit('payment:updated', { tripId: trip.id, status: payment.status });
     },
+    // In-trip chat: deliver the message to the other participant's room in real
+    // time (the sender already has it optimistically in the UI).
+    chatMessage(message, trip) {
+      if (!message || !trip) return;
+      const recipientId = message.senderId === trip.customerId ? trip.driverId : trip.customerId;
+      if (recipientId) {
+        io.to(`user:${recipientId}`).emit('chat:message', { message });
+      }
+    },
+    chatRead(trip, readerId) {
+      if (!trip || !readerId) return;
+      const recipientId = readerId === trip.customerId ? trip.driverId : trip.customerId;
+      if (recipientId) {
+        io.to(`user:${recipientId}`).emit('chat:read', { tripId: trip.id, readerId });
+      }
+    },
     driverStatus(driverPublic) {
       io.emit('driver:status', driverPublic);
     },
@@ -227,8 +246,10 @@ function initSocket(httpServer, corsOrigins) {
 }
 
 function serializeTrip(trip) {
-  // Include customer name for the driver view (kept minimal).
-  if (trip.customerId) {
+  // Include customer name for the driver view (kept minimal). Most trip objects
+  // already carry customer info from `withCustomerInfo`, so only look up when
+  // missing — avoids a DB round-trip per event on shared trips.
+  if (trip.customerId && trip.customerName == null && trip.customerPhone == null) {
     const c = repo.getUserById(trip.customerId);
     trip.customerName = c ? c.name : null;
     trip.customerPhone = c ? c.phone : null;

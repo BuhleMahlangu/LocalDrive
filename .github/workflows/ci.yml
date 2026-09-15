@@ -58,3 +58,13 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t drivelocal:ci .
+      - run: |
+          # Compose config is valid (don't need to pull/build to check it).
+          docker compose config --quiet

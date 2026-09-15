@@ -4,6 +4,8 @@ This guide takes the app live for a small single-driver service: a VPS (or alway
 
 The path below is the recommended **one-host** setup (frontend + API + WebSockets on one HTTPS domain). A lighter **two-host** alternative (static SPA + API) is covered at the end.
 
+> Prefer containers? Jump to **[§14 Docker](#14-docker-alternative-optional)** — a multi-stage `Dockerfile` + `docker-compose.yml` (with optional Caddy) are included at the repo root.
+
 ## 1. What you need
 
 - A domain (e.g. `drivelocal.example.co.za`) pointing to your server's public IP.
@@ -178,6 +180,41 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
   push handlers into the generated `sw.js` automatically.
 - Production OTP is a real ClickSend SMS under the surface (`123456` only in dev).
   Keep `NODE_ENV=development` for local testing to avoid burning SMS credits.
+
+## 14. Docker (alternative, optional)
+
+The repo ships with container files for a **single-container** deployment that matches
+the one-host model: the backend serves both the API and the built SPA.
+
+Files:
+- `Dockerfile` — multi-stage: builds the PWA, then runs the Node backend with `app/dist` baked in.
+- `docker-compose.yml` — `app` (backend) service + an **optional** `caddy` proxy service (HTTPS).
+- `Caddyfile` — reverse-proxies everything to the app container (WebSockets included).
+
+### Local test
+
+```bash
+cp backend/.env.example backend/.env   # add real secrets; DB_FILE is set by compose
+docker compose up --build app          # http://localhost:4000
+```
+
+### Production
+
+1. Point your domain at the host; open ports 80/443.
+2. Fill `backend/.env` per the §7 checklist (production fail-fast still applies).
+3. Set `APP_DOMAIN=https://your.domain` (compose env) and start everything:
+
+```bash
+APP_DOMAIN=https://drivelocal.example.co.za docker compose --profile proxy up --build -d
+```
+
+Caddy provisions the Let's Encrypt certificate automatically and routes `/api` and
+`/socket.io` to the app. SQLite data is kept in named volumes (`drivelocal-data`,
+`drivelocal-backups`) so the container is disposable.
+
+> Nothing is lost if the container is recreated: the DB lives in the `drivelocal-data`
+> volume and `npm run backup` inside the container writes to the `drivelocal-backups`
+> volume (schedule it via cron/systemd on the host). Keep backups off the host too.
 
 ## Troubleshooting
 
