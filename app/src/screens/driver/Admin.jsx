@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api, apiDownload, formatRand } from '../../api.js';
 import Map from '../../components/Map.jsx';
 import decodePolyline from '../../lib/polyline.js';
 
-// Platform owner console. Three tabs:
+// Platform owner console. Four tabs:
 //  - Drivers:  vet and approve/reject driver applications.
 //  - Records:  trip audit trail — search any rider/driver by name so the owner
 //              can reconstruct "who was with whom, when, and where".
+//  - Spots:    the preset pickup spots every customer and driver sees on the map.
 //  - Settings: platform commission + the automatic offline idle timer.
 export default function Admin() {
   const [tab, setTab] = useState('drivers');
@@ -17,9 +18,10 @@ export default function Admin() {
       <div className="btn-row" style={{ marginBottom: '10px' }}>
         <button className={`btn small ${tab === 'drivers' ? 'driver' : ''}`} onClick={() => setTab('drivers')}>Drivers</button>
         <button className={`btn small ${tab === 'records' ? 'driver' : ''}`} onClick={() => setTab('records')}>Records</button>
+        <button className={`btn small ${tab === 'spots' ? 'driver' : ''}`} onClick={() => setTab('spots')}>Spots</button>
         <button className={`btn small ${tab === 'settings' ? 'driver' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
-      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : <SettingsTab />}
+      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -172,6 +174,161 @@ function DocLink({ url, label }) {
       {label}
       {err && <em style={{ color: 'var(--danger)' }}> ({err})</em>}
     </a>
+  );
+}
+
+// Admin-managed preset pickup spots. Every customer (Book screen) and driver
+// (Dashboard map) sees these as pins. CRUD is admin-only; drivers view them
+// read-only and customers just pick the nearest one.
+function SpotsTab() {
+  const [spots, setSpots] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [movingId, setMovingId] = useState(null);
+  const [hint, setHint] = useState(null);
+  const [names, setNames] = useState({});
+  const renameTimers = useRef({});
+
+  async function load() {
+    try {
+      const res = await api('/admin/spots');
+      setSpots(Array.isArray(res.spots) ? res.spots : []);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  function rename(id, name) {
+    setNames((d) => ({ ...d, [id]: name }));
+    clearTimeout(renameTimers.current[id]);
+    renameTimers.current[id] = setTimeout(() => {
+      api(`/admin/spots/${id}`, { method: 'PUT', body: { name } })
+        .catch((err) => setError(err.message));
+    }, 700);
+  }
+
+  function flushRename(id, name) {
+    const current = names[id];
+    if (current != null && current !== name) {
+      api(`/admin/spots/${id}`, { method: 'PUT', body: { name: current } }).catch((err) => setError(err.message));
+    }
+    setNames((d) => { const next = { ...d }; delete next[id]; return next; });
+  }
+
+  async function addSpot(e) {
+    const { lat, lng } = e.latlng;
+    setBusy(true);
+    setError('');
+    try {
+      await api('/admin/spots', { method: 'POST', body: { name: 'New pickup spot', lat, lng } });
+      setHint(null);
+      setAdding(false);
+      await load();
+      setMessage('Pickup spot added — type a name for it below.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveSpot(e) {
+    const { lat, lng } = e.latlng;
+    const id = movingId;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/admin/spots/${id}`, { method: 'PUT', body: { lat, lng } });
+      setMovingId(null);
+      setHint(null);
+      await load();
+      setMessage('Pickup spot moved.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteSpot(id) {
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/admin/spots/${id}`, { method: 'DELETE' });
+      await load();
+      setMessage('Pickup spot deleted.');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function onMapClick(e) {
+    if (adding) addSpot(e);
+    else if (movingId) moveSpot(e);
+  }
+
+  const markers = (spots || []).map((s) => ({
+    lat: s.lat,
+    lng: s.lng,
+    type: 'spot',
+    name: s.name,
+    spot: s,
+  }));
+
+  return (
+    <>
+      <p className="subtitle">
+        Preset pickup spots are shown as pins to every customer (Book screen) and driver.
+        Tap <b>Add spot</b> then the map to drop a new one; <b>Move</b> and the map to
+        reposition; type to rename; ✕ deletes.
+      </p>
+      {message && <p className="success">{message}</p>}
+      {error && <p className="error">{error}</p>}
+
+      <div className="map-wrap" style={{ height: '320px', marginBottom: '12px' }}>
+        <Map markers={markers} onMapClick={onMapClick} autofitSpots />
+      </div>
+
+      <div className="btn-row" style={{ marginBottom: '6px' }}>
+        <button className="btn small primary" disabled={busy || adding || movingId != null} onClick={() => { setAdding(true); setMovingId(null); setHint('Tap the map where the new pickup spot is — then give it a name below.'); setMessage(''); setError(''); }}>
+          ＋ Add spot
+        </button>
+        {(adding || movingId != null) && (
+          <button className="btn small" onClick={() => { setAdding(false); setMovingId(null); setHint(null); }}>Cancel</button>
+        )}
+      </div>
+      {hint && <p className="hint" style={{ margin: '6px 0', color: 'var(--primary)' }}>{hint}</p>}
+
+      {!spots && <p className="hint">Loading spots…</p>}
+      {spots && spots.length === 0 && <p className="hint">No pickup spots yet — tap “Add spot” then the map.</p>}
+
+      {spots && spots.map((s) => (
+        <div className="card spots-editor" key={s.id} style={{ padding: '8px 12px', marginTop: '8px' }}>
+          <div className="spot-row">
+            <input
+              className="spot-name"
+              value={names[s.id] ?? s.name}
+              onChange={(e) => rename(s.id, e.target.value)}
+              onBlur={(e) => flushRename(s.id, e.target.value)}
+              title="Rename"
+            />
+            <span className="spot-coords">{s.lat.toFixed(4)}, {s.lng.toFixed(4)}</span>
+            <button
+              className="btn small"
+              disabled={busy || adding || movingId != null}
+              onClick={() => { setAdding(false); setMovingId(s.id); setHint(`Tap the map where “${names[s.id] ?? s.name}” should be.`); setMessage(''); setError(''); }}
+            >Move</button>
+            <button className="btn small danger" title="Delete" disabled={busy} onClick={() => deleteSpot(s.id)}>✕</button>
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 

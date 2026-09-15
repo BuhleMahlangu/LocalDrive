@@ -120,6 +120,41 @@ router.get('/trips/:id', (req, res, next) => {
     } catch (e) { next(e); }
   });
 
+// ---------- Pickup spots ----------
+// List spots (active + inactive for the admin overview).
+router.get('/spots', (_req, res) => {
+  res.json({ spots: repo.listPickupSpots(500) });
+});
+
+router.post('/spots', (req, res, next) => {
+  try {
+    const { name, category, address, lat, lng, note, sort } = req.body || {};
+    if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ error: 'name and lat/lng are required' });
+    }
+    const spot = repo.createPickupSpot({ name, category, address, lat, lng, note, sort });
+    res.status(201).json({ spot });
+  } catch (e) { next(e); }
+});
+
+router.put('/spots/:id', (req, res, next) => {
+  try {
+    const spot = repo.getPickupSpotById(req.params.id);
+    if (!spot) return res.status(404).json({ error: 'Spot not found' });
+    const updated = repo.updatePickupSpot(req.params.id, req.body || {});
+    res.json({ spot: updated });
+  } catch (e) { next(e); }
+});
+
+router.delete('/spots/:id', (req, res, next) => {
+  try {
+    const spot = repo.getPickupSpotById(req.params.id);
+    if (!spot) return res.status(404).json({ error: 'Spot not found' });
+    repo.deletePickupSpot(req.params.id);
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
   return router;
 }
 

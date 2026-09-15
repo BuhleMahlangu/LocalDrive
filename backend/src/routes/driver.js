@@ -133,38 +133,9 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Manage the service-area pickup spots (owner only, like all driver routes).
+  // List pickup spots (read-only for drivers; admin manages them via /api/admin/spots).
   router.get('/spots', (_req, res) => {
     res.json({ spots: repo.listPickupSpots() });
-  });
-
-  router.post('/spots', (req, res, next) => {
-    try {
-      const { name, category, address, lat, lng, note } = req.body;
-      if (!name || typeof lat !== 'number' || typeof lng !== 'number') {
-        return res.status(400).json({ error: 'name and lat/lng are required' });
-      }
-      const spot = repo.createPickupSpot({ name, category, address, lat, lng, note });
-      res.json({ spot });
-    } catch (e) { next(e); }
-  });
-
-  router.put('/spots/:id', (req, res, next) => {
-    try {
-      const { name, category, address, lat, lng, note, sort } = req.body;
-      const spot = repo.updatePickupSpot(req.params.id, {
-        name, category, address, lat, lng, note, sort,
-      });
-      if (!spot) return res.status(404).json({ error: 'Spot not found' });
-      res.json({ spot });
-    } catch (e) { next(e); }
-  });
-
-  router.delete('/spots/:id', (req, res, next) => {
-    try {
-      repo.deletePickupSpot(req.params.id);
-      res.json({ ok: true });
-    } catch (e) { next(e); }
   });
 
   router.get('/me', (req, res) => {

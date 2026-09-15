@@ -25,11 +25,6 @@ export default function Dashboard({ user, onUserUpdate }) {
   const [toast, setToast] = useState('');
   // Full-screen takeover for an incoming request so it can't be missed.
   const [showOverlay, setShowOverlay] = useState(false);
-  const [spotEditor, setSpotEditor] = useState(false);
-  const [addingSpot, setAddingSpot] = useState(false);
-  const [movingSpotId, setMovingSpotId] = useState(null);
-  const [spotHint, setSpotHint] = useState(null);
-  const [spotNames, setSpotNames] = useState({});
   const socketRef = useRef(null);
   const [socket, setSocket] = useState(null);
   const watchRef = useRef(null);
@@ -40,7 +35,6 @@ export default function Dashboard({ user, onUserUpdate }) {
   const driverLocRef = useRef(null);
   const activeRef = useRef(null);
   const fetchTimer = useRef(null);
-  const renameTimers = useRef({});
   // Track GPS positions during an ongoing trip for actual distance calculation.
   const tripLocs = useRef([]);
   const tripStart = useRef(null);
@@ -110,11 +104,6 @@ export default function Dashboard({ user, onUserUpdate }) {
       .then((r) => {
         const list = Array.isArray(r.spots) ? r.spots : [];
         setSpots(list);
-        setSpotNames((d) => {
-          const next = { ...d };
-          list.forEach((s) => { if (!next[s.id]) next[s.id] = s.name; });
-          return next;
-        });
       })
       .catch(() => {});
   }, []);
@@ -377,52 +366,6 @@ export default function Dashboard({ user, onUserUpdate }) {
     finally { setBusy(false); }
   }
 
-  // ---- Pickup-spot editor ----
-  function renameSpot(id, name) {
-    setSpotNames((d) => ({ ...d, [id]: name }));
-    clearTimeout(renameTimers.current[id]);
-    renameTimers.current[id] = setTimeout(() => {
-      api(`/driver/spots/${id}`, { method: 'PUT', body: { name } }).catch(() => {});
-    }, 700);
-  }
-
-  function deleteSpot(id) {
-    api(`/driver/spots/${id}`, { method: 'DELETE' })
-      .then(() => { refreshSpots(); setToast('Pickup spot deleted'); })
-      .catch(() => {});
-  }
-
-  function onSpotMapClick(e) {
-    if (!spotEditor) return;
-    const { lat, lng } = e.latlng;
-    if (movingSpotId) {
-      api(`/driver/spots/${movingSpotId}`, { method: 'PUT', body: { lat, lng } })
-        .then(() => {
-          refreshSpots();
-          setMovingSpotId(null);
-          setSpotHint(null);
-          setToast('Pickup spot moved ✔');
-        })
-        .catch(() => {});
-    } else if (addingSpot) {
-      api('/driver/spots', { method: 'POST', body: { name: 'New pickup spot', lat, lng } })
-        .then(() => {
-          refreshSpots();
-          setSpotHint(null);
-          setToast('Pickup spot added — type a name for it below');
-        })
-        .catch(() => {});
-    }
-  }
-
-  function closeSpotEditor() {
-    setSpotEditor(false);
-    setAddingSpot(false);
-    setMovingSpotId(null);
-    setSpotHint(null);
-    refreshSpots();
-  }
-
   const mapTrip = active || pending;
 
   const mapMarkers = useMemo(() => {
@@ -498,41 +441,6 @@ export default function Dashboard({ user, onUserUpdate }) {
         </label>
       </div>
 
-      <button className="chip-btn spots-toggle" onClick={() => { if (spotEditor) closeSpotEditor(); else setSpotEditor(true); }}>
-        📍 {spotEditor ? 'Close spot editor' : 'Manage pickup spots'}
-      </button>
-
-      {spotEditor && (
-        <div className="card spots-editor">
-          <p className="hint">
-            Tap <b>Add spot</b> then the map to drop a new pickup point, or tap <b>Move</b> and
-            tap the map to set an exact position. Type or tap to rename; ✕ deletes.
-          </p>
-          {spotHint && <p className="hint" style={{ margin: '6px 0', color: 'var(--primary)' }}>{spotHint}</p>}
-          <div className="btn-row">
-            <button className="btn small" disabled={addingSpot} onClick={() => { setAddingSpot(true); setMovingSpotId(null); setSpotHint('Tap the map where the new pickup spot is'); }}>
-              ＋ Add spot
-            </button>
-            {(addingSpot || movingSpotId) && (
-              <button className="btn small" onClick={() => { setAddingSpot(false); setMovingSpotId(null); setSpotHint(null); }}>Cancel</button>
-            )}
-          </div>
-          {spots.map((s) => (
-            <div key={s.id} className="spot-row">
-              <input
-                className="spot-name"
-                value={spotNames[s.id] ?? s.name}
-                onChange={(e) => renameSpot(s.id, e.target.value)}
-                title="Rename"
-              />
-              <span className="spot-coords">{s.lat.toFixed(4)}, {s.lng.toFixed(4)}</span>
-              <button className="btn small" onClick={() => { setAddingSpot(false); setMovingSpotId(s.id); setSpotHint(`Tap the map to move “${s.name}” precisely`); }}>Move</button>
-              <button className="btn small danger" title="Delete" onClick={() => deleteSpot(s.id)}>✕</button>
-            </div>
-          ))}
-        </div>
-      )}
-
       {pending && (
         <div className="card request-card">
           <div className="request-head">
@@ -588,14 +496,10 @@ export default function Dashboard({ user, onUserUpdate }) {
           markers={mapMarkers}
           routes={mapRoutes}
           autofit={!!(mapTrip?.pickup && mapTrip?.destination)}
-          onMapClick={spotEditor ? onSpotMapClick : undefined}
         />
         <div className="map-status">{online ? '● Live' : '○ Offline'}</div>
-        {spots.length > 0 && !spotEditor && (
+        {spots.length > 0 && (
           <div className="map-legend"><span className="legend-dot" /> Pickup spots</div>
-        )}
-        {spotEditor && (
-          <div className="map-status edit-flag">{addingSpot ? 'Tap the map to drop a new spot' : movingSpotId ? 'Tap the map where the spot should be' : 'Add / move / rename spots'}</div>
         )}
       </div>
 
