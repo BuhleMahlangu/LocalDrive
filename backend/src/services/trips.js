@@ -42,6 +42,8 @@ async function getRoute({ pickup, destination }) {
 }
 
 async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null }) {
+  // `getDriver()` is the platform rate card (representative pricing + booking
+  // preview). Actual dispatch goes to every online approved driver.
   const driver = repo.getDriver();
   const customer = repo.getUserById(customerId);
   if (!driver || !customer) {
@@ -52,10 +54,10 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
 
   const isScheduled = !!scheduledAt;
 
-  // Driver must be online to accept new *immediate* bookings. Scheduled trips
-  // are queued for later, so we don't require the driver to be online now.
-  if (!isScheduled && !driver.isOnline) {
-    const err = new Error('Driver unavailable, try again later');
+  // Any approved driver must be online to accept new *immediate* bookings.
+  // Scheduled trips are queued for later, so we don't require a driver online now.
+  if (!isScheduled && !repo.hasOnlineDriver()) {
+    const err = new Error('No drivers available, try again later');
     err.status = 409;
     err.code = 'DRIVER_OFFLINE';
     throw err;
@@ -106,65 +108,59 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
   return { trip, estimate, driverPublic: publicDriver(driver) };
 }
 
-// Move a scheduled trip into the live request flow so the driver can accept it.
-function activateScheduledTrip(tripId) {
-  const trip = repo.getTripById(tripId);
-  if (!trip || trip.status !== 'scheduled') {
-    const err = new Error('Trip is no longer scheduled');
-    err.status = 409;
-    throw err;
-  }
-  return repo.updateTrip(tripId, { status: 'requested' });
+// A driver activating a pre-booked ride claims it for themselves. Returns the
+// trip or null if another driver got there first (atomic guarded claim).
+function activateScheduledTrip(tripId, driverId) {
+  return repo.activateScheduledTripClaim(tripId, driverId);
 }
 
-// Check geofencing before dispatch: driver must be online + within (service radius + pickup distance).
+// Check geofencing before dispatch: at least one approved driver must be online
+// and — if any of them have reported a location — one must be within
+// (service radius + pickup distance). The vehicles' reported positions are the
+// fairest signal we have for "is someone near this pickup".
 function checkAvailabilityForPickup(pickup, scheduledAt) {
-  const driver = repo.getDriver();
-  // Scheduled trips are queued for later, so the driver doesn't need to be
-  // online right now — only the geofence matters.
-  if (!driver) return { ok: false, code: 'NO_DRIVER' };
-  if (!scheduledAt && !driver.isOnline) return { ok: false, code: 'DRIVER_OFFLINE' };
-  const loc = repo.getDriverLocation(driver.id);
-  if (!loc) return { ok: true, code: null }; // no location yet; allow booking, driver handles it
-  const { ok, distKm } = isWithinService(
-    driver.serviceRadiusKm, loc.lat, loc.lng, pickup.lat, pickup.lng,
-  );
-  return ok
-    ? { ok: true, code: null, distKm }
-    : { ok: false, code: 'OUT_OF_RANGE', distKm: pricing.round(distKm) };
+  // Immediate trips need at least one approved driver ONLINE right now. Scheduled
+  // trips only need the platform to have vetted drivers (they get activated
+  // when the time comes, by whichever driver is around then).
+  const drivers = scheduledAt ? repo.getAllActiveDrivers() : repo.listOnlineDrivers();
+  if (!drivers.length) return { ok: false, code: scheduledAt ? 'NO_DRIVER' : 'DRIVER_OFFLINE' };
+
+  // No driver has streamed a location yet — allow the booking; the drivers
+  // handle pickup via their own navigation.
+  const located = drivers
+    .map((d) => ({ driver: d, loc: repo.getDriverLocation(d.id) }))
+    .filter((x) => x.loc && typeof x.loc.lat === 'number' && typeof x.loc.lng === 'number')
+    .map(({ driver, loc }) => {
+      const { ok, distKm } = isWithinService(
+        driver.serviceRadiusKm, loc.lat, loc.lng, pickup.lat, pickup.lng,
+      );
+      return { ok, distKm };
+    });
+  if (!located.length) return { ok: true, code: null };
+
+  const nearest = located.sort((a, b) => a.distKm - b.distKm)[0];
+  return nearest.ok
+    ? { ok: true, code: null, distKm: pricing.round(nearest.distKm) }
+    : { ok: false, code: 'OUT_OF_RANGE', distKm: pricing.round(nearest.distKm) };
 }
 
 async function acceptTrip(tripId, driverId) {
-  const trip = repo.getTripById(tripId);
-  if (!trip || trip.status !== 'requested') {
+  // Atomic first-wins claim: if another driver already accepted (or the
+  // customer cancelled), claimTrip returns null and the loser gets a 409.
+  const updated = repo.claimTrip(tripId, driverId);
+  if (!updated) {
     const err = new Error('Trip is no longer available');
     err.status = 409;
     throw err;
   }
-  // Only the single driver can accept.
-  const driver = repo.getDriver();
-  if (!driver || driver.id !== driverId) {
-    const err = new Error('Unauthorized driver');
-    err.status = 403;
-    throw err;
-  }
-  const updated = repo.updateTrip(tripId, { driver_id: driverId, status: 'accepted', accepted_at: now() });
   return updated;
 }
 
-async function declineTrip(tripId, driverId, reason) {
-  const trip = repo.getTripById(tripId);
-  if (!trip || trip.status !== 'requested') {
-    const err = new Error('Trip is no longer available');
-    err.status = 409;
-    throw err;
-  }
-  return repo.updateTrip(tripId, {
-    status: 'cancelled',
-    cancel_reason: reason || 'Declined by driver',
-    cancel_actor: 'driver',
-    cancelled_at: now(),
-  });
+async function declineTrip(tripId, _driverId, _reason) {
+  // Multi-driver dispatch: a decline is a *dismissal for this driver only* — the
+  // request stays live for the other online drivers until one claims it or the
+  // customer cancels. The trip state is intentionally left untouched.
+  return { trip: repo.getTripById(tripId), declined: true };
 }
 
 async function startTrip(tripId, driverId) {

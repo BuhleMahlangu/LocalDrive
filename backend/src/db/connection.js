@@ -234,6 +234,18 @@ CREATE TABLE IF NOT EXISTS trip_messages (
   read_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);
+
+CREATE TABLE IF NOT EXISTS sos_alerts (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL,
+  trip_id    TEXT,
+  role       TEXT,
+  note       TEXT,
+  lat        REAL,
+  lng        REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
 `;
 
   sqliteDb.exec(SCHEMA);
@@ -348,6 +360,17 @@ CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, crea
     read_at    TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);
+  CREATE TABLE IF NOT EXISTS sos_alerts (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL,
+    trip_id    TEXT,
+    role       TEXT,
+    note       TEXT,
+    lat        REAL,
+    lng        REAL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
 `);
 
   // ---- Seed a demo promo code ----

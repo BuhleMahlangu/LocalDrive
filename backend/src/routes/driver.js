@@ -188,12 +188,16 @@ function driverRoutes({ notify }) {
     res.json({ trips });
   });
 
-  // Start (activate) a scheduled trip -> moves it into the request flow.
+  // Start (activate) a scheduled trip → claims it for the activating driver.
   router.post('/trips/:id/activate', (req, res, next) => {
     try {
-      const trip = tripService.activateScheduledTrip(req.params.id);
-      notify.tripUpdated(trip);
-      notify.newTripToDriver(trip, req.user.id, {});
+      const trip = tripService.activateScheduledTrip(req.params.id, req.user.id);
+      if (!trip) {
+        const err = new Error('Trip is no longer available');
+        err.status = 409;
+        return next(err);
+      }
+      notify.tripAccepted(trip);
       res.json({ trip });
     } catch (e) { next(e); }
   });
@@ -289,12 +293,12 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Decline trip request.
+  // Decline a trip request: in multi-driver dispatch this is a per-driver dismissal
+  // only — the request stays live for the other online drivers.
   router.post('/trips/:id/decline', async (req, res, next) => {
     try {
-      const trip = await tripService.declineTrip(req.params.id, req.user.id, req.body.reason);
-      notify.tripUpdated(trip);
-      res.json({ trip });
+      const { trip, declined } = await tripService.declineTrip(req.params.id, req.user.id, req.body.reason);
+      res.json({ trip, declined: !!declined });
     } catch (e) { next(e); }
   });
 

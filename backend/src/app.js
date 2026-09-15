@@ -11,7 +11,8 @@ const paymentsRoutes = require('./routes/payments');
 const pushRoutes = require('./routes/push');
 const spotsRoutes = require('./routes/spots');
 const publicRoutes = require('./routes/public');
-const adminRoutes = require('./routes/admin');
+const adminRoutesFactory = require('./routes/admin');
+const sosRoutesFactory = require('./routes/sos');
 const uploadsRoutes = require('./routes/uploads');
 const paymentsService = require('./services/payments');
 const { notFound, errorHandler } = require('./middleware');
@@ -62,7 +63,8 @@ function createApp({ notify }) {
 
   app.use('/api/driver', driverRoutesFactory({ notify }));
   app.use('/api/customer', customerRoutesFactory({ notify }));
-  app.use('/api/admin', adminRoutes);
+  app.use('/api/admin', adminRoutesFactory({ notify }));
+  app.use('/api/sos', sosRoutesFactory({ notify }));
   app.use('/api', uploadsRoutes); // serve vetted document uploads
 
   // Serve the built React app from the backend (single-server deploy). Hashed Vite

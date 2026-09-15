@@ -150,9 +150,10 @@ module.exports = {
   },
 
   getDriver() {
-    // Primary driver for the current single-driver dispatch: the admin owner by
-    // phone, falling back to the oldest active (approved) driver account so
-    // legacy databases and tests keep working.
+    // Platform "rate card" driver: the admin owner by phone, falling back to the
+    // oldest active (approved) driver account. Used ONLY for representative
+    // pricing/estimates and booking-screen preview — dispatch itself goes to
+    // *all* online approved drivers (see listOnlineDrivers()).
     const owner = config.driverPhone
       ? db.prepare("SELECT * FROM users WHERE role = 'admin' AND phone = ?").get(config.driverPhone)
       : null;
@@ -169,6 +170,35 @@ module.exports = {
       )
       .all()
       .map(mapUser);
+  },
+
+  // All platform owner/admin accounts (e.g. to fan out SOS alerts to).
+  getAllAdmins() {
+    return db.prepare("SELECT * FROM users WHERE role = 'admin'").all().map(mapUser);
+  },
+
+  // All vetted drivers (approved or pre-vetting NULL), regardless of online
+  // status — e.g. scheduled rides just need the platform to have drivers at all.
+  getAllActiveDrivers() {
+    return db
+      .prepare(
+        "SELECT * FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved' ORDER BY created_at",
+      )
+      .all()
+      .map(mapUser);
+  },
+
+  // Convenience alias matching the multi-driver dispatch wording. Suspended
+  // drivers are excluded (driver_status 'suspended' fails the COALESCE filter).
+  listOnlineDrivers() {
+    return this.getAllOnlineDrivers();
+  },
+
+  hasOnlineDriver() {
+    const row = db.prepare(
+      "SELECT 1 AS one FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved' AND is_online = 1 LIMIT 1",
+    ).get();
+    return !!row;
   },
 
   updateUserProfile(id, fields) {
@@ -302,8 +332,11 @@ module.exports = {
 
   setDriverStatus(id, status, rejectionReason) {
     db.prepare(
-      `UPDATE users SET driver_status = ?, driver_rejection_reason = ?, updated_at = ? WHERE id = ?`,
-    ).run(status || null, rejectionReason || null, now(), id);
+      `UPDATE users SET driver_status = ?,
+        driver_rejection_reason = ?,
+        is_online = CASE WHEN ? = 'suspended' THEN 0 ELSE is_online END,
+        updated_at = ? WHERE id = ?`,
+    ).run(status || null, rejectionReason || null, status || null, now(), id);
     if (status === 'approved') this.createWalletIfMissing(id);
     return this.getUserById(id);
   },
@@ -448,6 +481,145 @@ module.exports = {
     return mapTrip(db.prepare(
       "SELECT * FROM trips WHERE status = 'requested' ORDER BY requested_at ASC LIMIT 1",
     ).get());
+  },
+
+  // ---------- Multi-driver dispatch ----------
+  // Atomic first-wins claim: several drivers may be tapping "Accept" at once,
+  // but only the UPDATE whose WHERE still sees status='requested' succeeds.
+  // better-sqlite3 runs on a single connection, making this race-free.
+  claimTrip(tripId, driverId) {
+    const result = db.prepare(
+      `UPDATE trips SET driver_id = ?, status = 'accepted', accepted_at = ?
+       WHERE id = ? AND status = 'requested'`,
+    ).run(driverId, now(), tripId);
+    return result.changes === 1 ? this.getTripById(tripId) : null;
+  },
+
+  // A driver activating a pre-booked ride takes it on (claim). Guarded the same
+  // way so two drivers can't both activate the same scheduled trip.
+  activateScheduledTripClaim(tripId, driverId) {
+    const result = db.prepare(
+      `UPDATE trips SET driver_id = ?, status = 'accepted', accepted_at = ?
+       WHERE id = ? AND status = 'scheduled'`,
+    ).run(driverId, now(), tripId);
+    return result.changes === 1 ? this.getTripById(tripId) : null;
+  },
+
+  // ---------- Admin safety / audit search ----------
+  // Every trip is searchable by customer or driver name/phone so the platform
+  // owner can reconstruct "who was with whom, when, and where" for an incident.
+  // `from`/`to` are day-precision 'YYYY-MM-DD' strings matched against the
+  // requested_at day; `q` matches names/phones loosely; `status` is exact.
+  searchTripsForAdmin({ q = '', from = '', to = '', status = '', limit = 50 } = {}) {
+    const match = `%${String(q).trim()}%`;
+    const conditions = [];
+    const params = [];
+    if (String(q).trim()) {
+      conditions.push(`(
+        cu.name LIKE ? OR cu.phone LIKE ? OR
+        dr.name LIKE ? OR dr.phone LIKE ?
+      )`);
+      params.push(match, match, match, match);
+    }
+    if (from) {
+      conditions.push('substr(t.requested_at, 1, 10) >= ?');
+      params.push(String(from).trim());
+    }
+    if (to) {
+      conditions.push('substr(t.requested_at, 1, 10) <= ?');
+      params.push(String(to).trim());
+    }
+    if (status) {
+      conditions.push('t.status = ?');
+      params.push(String(status).trim());
+    }
+    params.push(Math.max(1, Math.min(limit, 200)));
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    return db.prepare(
+      `SELECT t.*, cu.name AS cust_name, cu.phone AS cust_phone,
+              dr.name AS drv_name, dr.phone AS drv_phone
+       FROM trips t
+       LEFT JOIN users cu ON cu.id = t.customer_id
+       LEFT JOIN users dr ON dr.id = t.driver_id
+       ${where}
+       ORDER BY t.requested_at DESC
+       LIMIT ?`,
+    ).all(...params).map((row) => ({
+      ...mapTrip(row),
+      customer: { name: row.cust_name, phone: row.cust_phone },
+      driver: { name: row.drv_name, phone: row.drv_phone },
+    }));
+  },
+
+  // Full audit record for one trip: resolved participant names + payment + the
+  // in-trip message thread (threats, agreements, and witness statements matter).
+  getTripAuditRecord(tripId) {
+    const row = db.prepare(
+      `SELECT t.*, cu.name AS cust_name, cu.phone AS cust_phone,
+              dr.name AS drv_name, dr.phone AS drv_phone
+       FROM trips t
+       LEFT JOIN users cu ON cu.id = t.customer_id
+       LEFT JOIN users dr ON dr.id = t.driver_id
+       WHERE t.id = ?`,
+    ).get(tripId);
+    if (!row) return null;
+    return {
+      ...mapTrip(row),
+      customer: { name: row.cust_name, phone: row.cust_phone },
+      driver: { name: row.drv_name, phone: row.drv_phone },
+      driverLastLocation: row.driver_id ? this.getDriverLocation(row.driver_id) : null,
+      sosAlerts: this.getSosAlertsForTrip(tripId),
+      payment: this.getPaymentByTrip(tripId),
+      messages: this.getTripMessages(tripId, 200).map((m) => {
+        const sender = m.senderId === row.customer_id
+          ? { id: row.customer_id, name: row.cust_name, phone: row.cust_phone, role: 'customer' }
+          : { id: row.driver_id, name: row.drv_name, phone: row.drv_phone, role: 'driver' };
+        return { ...m, sender };
+      }),
+    };
+  },
+
+  // ---------- SOS alerts ----------
+  // Every emergency alert is stored and linked to its trip (if any) so the
+  // safety audit trail ("who was with whom, when, where, and what happened")
+  // is never lost — even after the trip has long finished.
+  createSosAlert({ userId, tripId, role, note, lat, lng }) {
+    const id = uid('sos');
+    db.prepare(
+      'INSERT INTO sos_alerts (id, user_id, trip_id, role, note, lat, lng) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, userId, tripId || null, role || null, String(note || '').slice(0, 500), lat ?? null, lng ?? null);
+    return this.getSosAlertById(id);
+  },
+
+  getSosAlertById(id) {
+    return this.mapSosAlert(db.prepare('SELECT * FROM sos_alerts WHERE id = ?').get(id));
+  },
+
+  getSosAlertsForTrip(tripId) {
+    return db.prepare(
+      `SELECT s.*, u.name AS user_name, u.phone AS user_phone, u.role AS user_role
+       FROM sos_alerts s
+       LEFT JOIN users u ON u.id = s.user_id
+       WHERE s.trip_id = ?
+       ORDER BY s.created_at ASC`,
+    ).all(tripId).map((row) => this.mapSosAlert(row));
+  },
+
+  mapSosAlert(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      userId: row.user_id,
+      tripId: row.trip_id,
+      role: row.role,
+      note: row.note,
+      lat: row.lat,
+      lng: row.lng,
+      createdAt: row.created_at,
+      userName: row.user_name,
+      userPhone: row.user_phone,
+      userRole: row.user_role,
+    };
   },
 
   // ---------- In-trip chat ----------

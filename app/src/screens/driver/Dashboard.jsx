@@ -5,6 +5,7 @@ import Chat from '../../components/Chat.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import decodePolyline from '../../lib/polyline.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
+import { sendSos } from '../../lib/emergency.js';
 
 const AREA_CENTER = [-26.2155, 29.2916];
 
@@ -138,6 +139,18 @@ export default function Dashboard({ user, onUserUpdate }) {
         surfaceRequest(data.trip);
         setToast('New booking request received!');
       }
+    });
+    // Another driver claimed the request — clear it here so the overlay/card
+    // doesn't linger after a losed accept race.
+    socket.on('trip:request:taken', (data) => {
+      if (!data?.tripId) return;
+      handledRef.current.add(data.tripId);
+      if (pendingIdRef.current === data.tripId) {
+        setPending(null);
+        pendingIdRef.current = null;
+      }
+      setShowOverlay(false);
+      refresh();
     });
     socket.on('trip:scheduled', () => {
       api('/driver/scheduled-trips').then((r) => setScheduled(Array.isArray(r.trips) ? r.trips : [])).catch(() => {});
@@ -317,6 +330,17 @@ export default function Dashboard({ user, onUserUpdate }) {
     finally { setBusy(false); }
   }
 
+  async function sos() {
+    if (!active) return;
+    setError('');
+    try {
+      // Records the alert against this trip and pings the platform owner
+      // (real-time + SMS) — the customer-facing flow shares WhatsApp too.
+      await sendSos({ tripId: active.id, note: '🚨 SOS — the driver needs help right now!' });
+      setToast('SOS sent to the platform owner');
+    } catch (e) { setError(e.message); }
+  }
+
   async function respond(action) {
     if (!pending) return;
     handledRef.current.add(pending.id);
@@ -341,11 +365,12 @@ export default function Dashboard({ user, onUserUpdate }) {
     setBusy(true);
     setError('');
     try {
+      // Activating a scheduled ride claims it for this driver (multi-driver
+      // platform) — it becomes an accepted in-progress trip right away.
       const res = await api(`/driver/trips/${t.id}/activate`, { method: 'POST' });
-      if (res.trip && res.trip.status === 'requested') {
-        setPending(res.trip);
-        pendingIdRef.current = res.trip.id;
-        setToast('Scheduled ride is now active — accept it below ✔');
+      if (res.trip && res.trip.status === 'accepted') {
+        setActive(res.trip);
+        setToast('Scheduled ride claimed — start when the customer is in ✔');
       }
       refresh();
     } catch (e) { setError(e.message); }
@@ -611,6 +636,9 @@ export default function Dashboard({ user, onUserUpdate }) {
           )}
           {(active.status === 'accepted' || active.status === 'ongoing') && (
             <button className="btn danger" onClick={cancelTrip} disabled={busy} style={{ marginTop: '6px' }}>Cancel trip</button>
+          )}
+          {(active.status === 'accepted' || active.status === 'ongoing') && (
+            <button className="sos-btn" onClick={sos} disabled={busy} title="Emergency — notifies the platform owner immediately">🆘 SOS</button>
           )}
         </div>
       )}

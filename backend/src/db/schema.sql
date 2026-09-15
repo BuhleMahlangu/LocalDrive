@@ -169,3 +169,17 @@ CREATE TABLE IF NOT EXISTS trip_messages (
   read_at    TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_trip_messages_trip ON trip_messages(trip_id, created_at);
+
+-- Safety/emergency alerts: every SOS press is recorded, linked to its trip, so
+-- the audit trail ("who was with whom, when, where, what happened") survives.
+CREATE TABLE IF NOT EXISTS sos_alerts (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  trip_id    TEXT REFERENCES trips(id),
+  role       TEXT,
+  note       TEXT,
+  lat        DOUBLE PRECISION,
+  lng        DOUBLE PRECISION,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);

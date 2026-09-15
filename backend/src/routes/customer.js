@@ -9,13 +9,14 @@ const push = require('../services/push');
 function customerRoutes({ notify }) {
   const router = Router();
 
-  // Public: is the driver online right now?
+  // Public: is any approved driver online right now?
   router.get('/driver/availability', (_req, res) => {
-    const driver = repo.getDriver();
-    res.json({ isOnline: !!(driver && driver.isOnline) });
+    res.json({ isOnline: repo.hasOnlineDriver() });
   });
 
-  // Public: driver's public details (for the booking screen).
+  // Public: driver's public details (for the booking screen) — the platform's
+  // representative "rate card" driver. The actual assigned driver is whoever
+  // claims the request.
   router.get('/driver', (_req, res) => {
     const driver = repo.getDriver();
     if (!driver) return res.status(404).json({ error: 'No driver configured' });
@@ -131,14 +132,14 @@ function customerRoutes({ notify }) {
         pickupAddress: pickup?.address, pickupLat: pickup?.lat, pickupLng: pickup?.lng,
       });
 
-      // Push the request to the single driver (only for immediate trips;
-      // scheduled trips are surfaced in the driver's Upcoming list instead).
+      // Fan the request out to every online approved driver (immediate trips).
+      // Scheduled trips live in every approved driver's Upcoming list instead,
+      // with a heads-up push so they know to look.
+      const drivers = repo.listOnlineDrivers();
       if (!trip.scheduledAt) {
-        const driver = repo.getDriver();
-        if (driver) notify.newTripToDriver(trip, driver.id, driverPublic);
+        for (const d of drivers) notify.newTripToDriver(trip, d.id, driverPublic);
       } else {
-        const driver = repo.getDriver();
-        if (driver) notify.scheduledTripAdded(trip, driver.id);
+        for (const d of drivers) notify.scheduledTripAdded(trip, d.id);
       }
 
       res.status(201).json({ trip, estimate, driver: driverPublic });

@@ -218,7 +218,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     }
     setSosError('');
     try {
-      await sendSos({ contact, note: '🚨 SOS — I need help right now!' });
+      await sendSos({ contact, tripId: trip?.id, note: '🚨 SOS — I need help right now!' });
     } catch (err) { setSosError(err.message); }
   }
 
@@ -229,7 +229,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       const saved = setEmergencyContact({ name: sosName, phone: sosPhone });
       setSosContact(saved);
       setSosOpen(false);
-      await sendSos({ contact: saved, note: '🚨 SOS — I need help right now!' });
+      await sendSos({ contact: saved, tripId: trip?.id, note: '🚨 SOS — I need help right now!' });
     } catch (err) { setSosError(err.message); }
   }
 

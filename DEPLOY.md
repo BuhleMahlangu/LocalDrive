@@ -216,6 +216,35 @@ Caddy provisions the Let's Encrypt certificate automatically and routes `/api` a
 > volume and `npm run backup` inside the container writes to the `drivelocal-backups`
 > volume (schedule it via cron/systemd on the host). Keep backups off the host too.
 
+### Automatic backups (compose `backup` service)
+
+The compose file also starts a `backup` service (same image, no open ports) that
+runs `node src/scripts/backup-loop.js`: an online SQLite backup on boot, then every
+`BACKUP_INTERVAL_HOURS` (default 6). It keeps the newest `BACKUP_KEEP` copies in the
+`drivelocal-backups` volume.
+
+```bash
+docker compose up --build -d            # starts app + backup together
+```
+
+**Off-site copy (strongly recommended):** point the backup service at any
+S3-compatible bucket (AWS S3, Cloudflare R2, Backblaze B2, MinIO…) so a dead or
+stolen host can never destroy the safety audit trail. Add these to the shell
+running compose (or to `backend/.env`):
+
+```bash
+BACKUP_S3_ENDPOINT=https://s3.af-south-1.amazonaws.com   # R2/B2/MinIO endpoints work too
+BACKUP_S3_BUCKET=drivelocal-backups
+BACKUP_S3_KEY=...
+BACKUP_S3_SECRET=...
+BACKUP_S3_REGION=af-south-1       # default us-east-1
+BACKUP_S3_PREFIX=drivelocal       # object-key prefix inside the bucket
+```
+
+Uploads use AWS SigV4 (path-style) with no SDK — the same code works for any
+S3-compatible provider. Restore by copying a snapshot's `.sqlite` file over
+`/app/data/drivelocal.sqlite` (the `drivelocal-data` volume) and restarting `app`. The `backup` container runs inside the same network and needs **no** network config beyond DNS access to the object-storage endpoint.
+
 ## Troubleshooting
 
 - **Backend won't start** → read the error: production fail-fast lists exactly which env vars are missing/weak.

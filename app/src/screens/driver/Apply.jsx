@@ -6,7 +6,7 @@ import Icon from '../../components/Icon.jsx';
 // Driver onboarding: collect the vetting documents (SA ID number + copies) and
 // show the application status until the admin approves the driver.
 export default function Apply({ user, onUserUpdate, onLogout, onSwitchRole }) {
-  const [status, setStatus] = useState('loading'); // loading | pending | rejected | form
+  const [status, setStatus] = useState('loading'); // loading | pending | rejected | suspended | form
   const [application, setApplication] = useState(null);
   const [idNumber, setIdNumber] = useState('');
   const [idCopy, setIdCopy] = useState(null);
@@ -22,12 +22,16 @@ export default function Apply({ user, onUserUpdate, onLogout, onSwitchRole }) {
       .then((r) => {
         setApplication(r.application);
         setIdNumber(r.application?.idNumber || '');
-        if (r.driverStatus === 'pending') setStatus('pending');
-        else if (r.driverStatus === 'rejected') setStatus('rejected');
+        // Passing the current driver_status through keeps this screen honest:
+        // the admin (owner) decides who may drive.
+        const remote = r.driverStatus || user.driverStatus;
+        if (remote === 'pending') setStatus('pending');
+        else if (remote === 'rejected') setStatus('rejected');
+        else if (remote === 'suspended') setStatus('suspended');
         else setStatus('form');
       })
       .catch(() => setStatus('form'));
-  }, []);
+  }, [user.driverStatus]);
 
   function onFile(setter) {
     return (e) => {
@@ -81,6 +85,26 @@ export default function Apply({ user, onUserUpdate, onLogout, onSwitchRole }) {
 
       <div className="screen">
         {status === 'loading' && <p className="hint">Loading…</p>}
+
+        {status === 'suspended' && (
+          <div className="card">
+            <h2>Driver access suspended</h2>
+            <p className="error" style={{ margin: '8px 0' }}>
+              Your access to the driver app has been suspended by the platform owner.
+              You can't go online or take rides right now.
+            </p>
+            <p className="hint">
+              {user.rejectionReason
+                ? <>Reason given: <strong>{user.rejectionReason}</strong></>
+                : 'Contact the platform owner if you believe this is a mistake.'}
+            </p>
+            <div className="btn-row">
+              <button className="btn" onClick={() => onSwitchRole('customer')}>
+                <Icon name="swap" size={14} /> Use the customer app
+              </button>
+            </div>
+          </div>
+        )}
 
         {status === 'pending' && (
           <div className="card">

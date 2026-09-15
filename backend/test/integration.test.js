@@ -1,4 +1,4 @@
-// HTTP integration tests. Boots the real Express app (no socket.io, stub notify)
+﻿// HTTP integration tests. Boots the real Express app (no socket.io, stub notify)
 // against an in-memory SQLite DB and drives the full customer <-> driver journey
 // over HTTP with `fetch`, the same way the running server sees it.
 //
@@ -26,7 +26,8 @@ const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
   tripAccepted() {}, tripArrived() {}, paymentUpdated() {},
   driverStatus() {}, onlineDriversChanged() {}, chatMessage() {},
-  chatRead() {},
+  chatRead() {}, tripClaimed() {}, sosAlert() {}, kickDriver() {},
+  forceOffline() {},
 };
 
 let server;
@@ -192,7 +193,7 @@ test('estimate endpoint returns a fare breakdown + route', async () => {
 
 test('full trip lifecycle over HTTP', async () => {
   const driver = ensureDriver();
-  const customer = await login('+27730003333', 'customer', 'Sipho', 's@x.za');
+  const customer = await login('+27730003333', 'customer', 'Mandla', 's@x.za');
 
   const online = await api('POST', '/api/driver/online', { isOnline: true }, driver.token);
   assert.equal(online.json.isOnline, true);
@@ -278,13 +279,137 @@ test('full trip lifecycle over HTTP', async () => {
     destination: { lat: -25.7461, lng: 28.25, address: 'Centurion' },
     paymentMethod: 'cash',
   }, customer.token);
-  assert.equal(offlineBook.status, 409);
+assert.equal(offlineBook.status, 409);
   assert.equal(offlineBook.json.code, 'DRIVER_OFFLINE');
+});
+
+test('multi-driver dispatch: every online driver gets the request, first claim wins, decline is a dismissal', async () => {
+  const driverA = ensureDriver();
+  let driverB = repo.getUserByPhone('+27826661111', 'driver');
+  if (!driverB) {
+    driverB = repo.createUser({ phone: '+27826661111', name: 'Sipho', email: 'sip@x.za', role: 'driver' });
+  }
+  const tokenB = signToken({ id: driverB.id, role: 'driver' });
+  const customer = await login('+27730005555', 'customer', 'Zamo', 'zamo@x.za');
+
+  await api('POST', '/api/driver/online', { isOnline: true }, driverA.token);
+  await api('POST', '/api/driver/online', { isOnline: true }, tokenB);
+
+  const book = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, customer.token);
+  assert.equal(book.status, 201);
+  assert.equal(book.json.trip.status, 'requested');
+  const tripId = book.json.trip.id;
+
+  // Both online drivers can see the same open request.
+  const pendingA = await api('GET', '/api/driver/pending-trip', null, driverA.token);
+  assert.equal(pendingA.json.trip.id, tripId);
+  const pendingB = await api('GET', '/api/driver/pending-trip', null, tokenB);
+  assert.equal(pendingB.json.trip.id, tripId);
+
+  // Declining is per-driver: the request stays live for everyone else.
+  const decline = await api('POST', `/api/driver/trips/${tripId}/decline`, { reason: 'Too far' }, driverA.token);
+  assert.equal(decline.status, 200);
+  assert.equal(decline.json.declined, true);
+  const stillPendingB = await api('GET', '/api/driver/pending-trip', null, tokenB);
+  assert.equal(stillPendingB.json.trip.id, tripId);
+
+  // Driver B claims it first.
+  const acceptB = await api('POST', `/api/driver/trips/${tripId}/accept`, {}, tokenB);
+  assert.equal(acceptB.status, 200);
+  assert.equal(acceptB.json.trip.status, 'accepted');
+  assert.equal(acceptB.json.trip.driverId, driverB.id);
+
+  // The same request is now gone for Driver A (409 on a second accept).
+  const acceptA2 = await api('POST', `/api/driver/trips/${tripId}/accept`, {}, driverA.token);
+  assert.equal(acceptA2.status, 409);
+  const lost = await api('GET', '/api/driver/pending-trip', null, driverA.token);
+  assert.equal(lost.json.trip, null);
+
+  // The customer's active trip shows whichever driver won the race.
+  const active = await api('GET', '/api/customer/trips/active', null, customer.token);
+  assert.equal(active.json.trip.id, tripId);
+  assert.equal(active.json.trip.driverId, driverB.id);
+
+  // Take the trip through to completion for a deterministic DB state.
+  await api('POST', `/api/driver/trips/${tripId}/start`, {}, tokenB);
+  const done = await api('POST', `/api/driver/trips/${tripId}/complete`, {}, tokenB);
+  assert.equal(done.json.trip.status, 'completed');
+});
+
+test('SOS alerts are recorded, keep a trip link, and surface in the admin audit', async () => {
+  const driver = ensureDriver();
+  const admin = ensureAdmin();
+  const customer = await login('+27730006666', 'customer', 'Khethiwe', 'k@x.za');
+
+  await api('POST', '/api/driver/online', { isOnline: true }, driver.token);
+  await api('POST', '/api/driver/location', { lat: -26.2041, lng: 28.0473, accuracy: 12 }, driver.token);
+
+  const book = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, customer.token);
+  const tripId = book.json.trip.id;
+  await api('POST', `/api/driver/trips/${tripId}/accept`, {}, driver.token);
+
+  // The customer on the trip presses SOS with their live coordinates.
+  const sos = await api('POST', '/api/sos', {
+    tripId, note: 'Feel unsafe — please check in', lat: -26.2041, lng: 28.0473,
+  }, customer.token);
+  assert.equal(sos.status, 201);
+  assert.equal(sos.json.alert.tripId, tripId);
+  assert.ok(sos.json.alert.id);
+
+  // A stranger can't attach an SOS to a trip they aren't part of.
+  const stranger = await login('+27730007777', 'customer', 'Bongani', 'b@x.za');
+  const notYours = await api('POST', '/api/sos', { tripId }, stranger.token);
+  assert.equal(notYours.status, 403);
+
+  // The driver can also raise one on their own trip.
+  const driverSos = await api('POST', '/api/sos', { tripId, note: 'Flat tyre' }, driver.token);
+  assert.equal(driverSos.status, 201);
+
+  // The owner sees both alerts (with who pressed them) + the driver's last fix.
+  const audit = await api('GET', `/api/admin/trips/${tripId}`, null, admin.token);
+  assert.equal(audit.status, 200);
+  assert.equal(audit.json.trip.sosAlerts.length, 2);
+  assert.ok(audit.json.trip.sosAlerts.some((a) => a.userRole === 'customer' && a.userName === 'Khethiwe'));
+  assert.ok(audit.json.trip.sosAlerts.some((a) => a.userRole === 'driver' && a.note === 'Flat tyre'));
+  assert.ok(audit.json.trip.driverLastLocation && audit.json.trip.driverLastLocation.lat === -26.2041);
+});
+
+test('admin can suspend a driver (blocks driver routes) and unsuspend them', async () => {
+  const admin = ensureAdmin();
+  let driver = repo.getUserByPhone('+27824442222', 'driver');
+  if (!driver) {
+    driver = repo.createUser({ phone: '+27824442222', name: 'Lerato', email: 'ler@x.za', role: 'driver' });
+  }
+  const token = signToken({ id: driver.id, role: 'driver' });
+
+  // Approved driver reaches operational endpoints.
+  const online = await api('POST', '/api/driver/online', { isOnline: true }, token);
+  assert.equal(online.json.isOnline, true);
+
+  const suspend = await api('POST', `/api/admin/drivers/${driver.id}/suspend`, {}, admin.token);
+  assert.equal(suspend.status, 200);
+  assert.equal(suspend.json.driver.driverStatus, 'suspended');
+  assert.equal(suspend.json.driver.isOnline, false);
+
+  // Suspended => hard-blocked from every driver route.
+  const blocked = await api('GET', '/api/driver/wallet', null, token);
+  assert.equal(blocked.status, 403);
+
+  // Unsuspend restores them and the gate opens again.
+  const unsuspend = await api('POST', `/api/admin/drivers/${driver.id}/unsuspend`, {}, admin.token);
+  assert.equal(unsuspend.status, 200);
+  assert.equal(unsuspend.json.driver.driverStatus, 'approved');
+  const wallet = await api('GET', '/api/driver/wallet', null, token);
+  assert.equal(wallet.status, 200);
 });
 
 test('scheduled rides: book while offline, driver activates, customer cancels the other', async () => {
   const driver = ensureDriver();
-  const customer = await login('+27730004444', 'customer', 'Zinhle', 'z@x.za');
+  const customer = await login('+27730004444', 'customer', 'Busi', 'z@x.za');
 
   await api('POST', '/api/driver/online', { isOnline: false }, driver.token);
 
@@ -303,9 +428,13 @@ test('scheduled rides: book while offline, driver activates, customer cancels th
   const driverList = await api('GET', '/api/driver/scheduled-trips', null, driver.token);
   assert.ok(driverList.json.trips.some((t) => t.id === schedId));
 
-  const act = await api('POST', `/api/driver/trips/${schedId}/activate`, {}, driver.token);
+const act = await api('POST', `/api/driver/trips/${schedId}/activate`, {}, driver.token);
   assert.equal(act.status, 200);
-  assert.equal(act.json.trip.status, 'requested');
+  // Activating a scheduled trip claims it for the activating driver in the
+  // multi-driver platform (it becomes an accepted, assigned ride — not a bare
+  // 'requested' queue entry).
+  assert.equal(act.json.trip.status, 'accepted');
+  assert.equal(act.json.trip.driverId, driver.user.id);
 
   const sched2 = await api('POST', '/api/customer/trips', {
     pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
@@ -482,4 +611,78 @@ test('in-trip chat: participants can send/read messages, strangers cannot', asyn
   assert.equal(forbidWrite.status, 403);
   const forbidRead = await api('GET', `/api/chat/trips/${tripId}/messages`, null, outsider.token);
   assert.equal(forbidRead.status, 403);
+});
+
+test('admin trip-record audit: search by customer/driver name, status, date, and full detail', async () => {
+  const admin = ensureAdmin();
+
+  const c = await login('+27730009999', 'customer', 'Busi', 'z@x.za');
+  const d = await login('+27829994444', 'driver', 'Mandla', 's@x.za');
+
+// Two trips involving exactly the customer, only one involving the driver —
+  // enough to prove the search joins by name and resolves who was with whom.
+  const shared = repo.createTrip({
+    customerId: c.user.id,
+    driverId: d.user.id,
+    status: 'completed',
+    pickup: { address: '1 Voortrekker Rd, Pretoria', lat: -26.2044, lng: 28.0416 },
+    destination: { address: '2 Marshall St, Johannesburg', lat: -26.2045, lng: 28.0417 },
+    distanceKm: 5, durationMin: 15, fareEstimate: 90,
+    paymentMethod: 'cash', routePolyline: 'ab_5rXq',
+  });
+  const solo = repo.createTrip({
+    customerId: c.user.id,
+    status: 'requested',
+    pickup: { address: '3 Kerk St', lat: -26.1, lng: 28.0 },
+    destination: { address: '4 Church St', lat: -26.2, lng: 28.1 },
+  });
+  repo.createTripMessage({ tripId: shared.id, senderId: c.user.id, body: 'Please wait by the gate' });
+
+// The audit trail is owner-only.
+  const forbidden = await api('GET', '/api/admin/trips/search?q=Mandla', null, c.token);
+  assert.equal(forbidden.status, 403);
+
+  // Search by driver name: the trip Mandla was on, with both identities resolved.
+  const byDriver = await api('GET', '/api/admin/trips/search?q=Mandla', null, admin.token);
+  assert.equal(byDriver.status, 200);
+  assert.ok(byDriver.json.trips.some((t) => t.id === shared.id));
+  const row = byDriver.json.trips.find((t) => t.id === shared.id);
+  assert.equal(row.customer.name, 'Busi');
+  assert.equal(row.customer.phone, '+27730009999');
+  assert.equal(row.driver.name, 'Mandla');
+  assert.equal(row.driver.phone, '+27829994444');
+
+  // Search by customer name: both her trips come back (with and without a driver).
+  const byCustomer = await api('GET', '/api/admin/trips/search?q=Busi', null, admin.token);
+  assert.equal(byCustomer.status, 200);
+  assert.ok(byCustomer.json.trips.some((t) => t.id === shared.id));
+  assert.ok(byCustomer.json.trips.some((t) => t.id === solo.id));
+
+// Exact status filter narrows to completed rides only.
+  const completed = await api('GET', '/api/admin/trips/search?q=Busi&status=completed', null, admin.token);
+  assert.equal(completed.status, 200);
+  assert.deepEqual(completed.json.trips.map((t) => t.id), [shared.id]);
+
+  // Day-range filter (timestamps are stored/served in UTC).
+  const today = new Date().toISOString().slice(0, 10);
+  const dated = await api('GET', `/api/admin/trips/search?q=Busi&from=${today}&to=${today}`, null, admin.token);
+  assert.equal(dated.status, 200);
+  assert.ok(dated.json.trips.some((t) => t.id === shared.id));
+
+  // The full record: identities, addresses, coords, and the message thread.
+  const detail = await api('GET', `/api/admin/trips/${shared.id}`, null, admin.token);
+  assert.equal(detail.status, 200);
+  const trip = detail.json.trip;
+  assert.equal(trip.customer.name, 'Busi');
+  assert.equal(trip.driver.name, 'Mandla');
+  assert.equal(trip.pickup.address, '1 Voortrekker Rd, Pretoria');
+  assert.equal(trip.destination.address, '2 Marshall St, Johannesburg');
+  assert.equal(trip.routePolyline, 'ab_5rXq');
+  assert.equal(trip.messages.length, 1);
+  assert.equal(trip.messages[0].body, 'Please wait by the gate');
+  assert.equal(trip.messages[0].sender.name, 'Busi');
+  assert.equal(trip.messages[0].sender.role, 'customer');
+
+  const missing = await api('GET', '/api/admin/trips/does-not-exist', null, admin.token);
+  assert.equal(missing.status, 404);
 });

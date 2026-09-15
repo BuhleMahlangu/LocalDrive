@@ -49,6 +49,31 @@ services:
       - caddy-config:/config
     profiles: ["proxy"]
 
+  # Automatic local backups (keeps BACKUP_KEEP copies in drivelocal-backups),
+  # every BACKUP_INTERVAL_HOURS. For off-site protection set the BACKUP_S3_*
+  # vars to any S3-compatible bucket — a copy of the safety audit trail leaves
+  # the box so a dead machine never loses it.
+  backup:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    environment:
+      NODE_ENV: production
+      DB_FILE: /data/drivelocal.sqlite
+      BACKUP_INTERVAL_HOURS: "${BACKUP_INTERVAL_HOURS:-6}"
+      BACKUP_KEEP: "${BACKUP_KEEP:-14}"
+      BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
+      BACKUP_S3_BUCKET: "${BACKUP_S3_BUCKET:-}"
+      BACKUP_S3_KEY: "${BACKUP_S3_KEY:-}"
+      BACKUP_S3_SECRET: "${BACKUP_S3_SECRET:-}"
+      BACKUP_S3_REGION: "${BACKUP_S3_REGION:-us-east-1}"
+      BACKUP_S3_PREFIX: "${BACKUP_S3_PREFIX:-drivelocal}"
+    volumes:
+      - drivelocal-data:/data:ro
+      - drivelocal-backups:/app/backups
+    command: node src/scripts/backup-loop.js
+
 volumes:
   drivelocal-data:
   drivelocal-backups:

@@ -109,6 +109,7 @@ function initSocket(httpServer, corsOrigins) {
     clearOfflineTimer(id);
 
     // Can this user act as a driver (admin owner or approved/vetted driver)?
+    // Suspended drivers are excluded everywhere.
     const isActiveDriver = () => socket.user.role === 'admin'
       || (socket.user.role === 'driver'
         && (socket.user.driverStatus === 'approved' || socket.user.driverStatus == null));
@@ -202,6 +203,39 @@ function initSocket(httpServer, corsOrigins) {
         body: 'Your driver has accepted your booking.',
         data: { type: 'tripAccepted', tripId: trip.id },
       });
+      this.tripClaimed(trip);
+    },
+    // Tell every other online driver their offered request is taken, so their
+    // incoming-request card clears without a race between the their accept tap
+    // and their pending-trip poll.
+    tripClaimed(trip) {
+      if (!trip || !trip.driverId) return;
+      for (const driver of repo.listOnlineDrivers()) {
+        if (driver.id === trip.driverId) continue;
+        io.to(`user:${driver.id}`).emit('trip:request:taken', { tripId: trip.id });
+      }
+    },
+    // Emergency alert -> every admin/owner account, in real time + web push.
+    // The full detail (with trip context) is retrievable from the Records audit.
+    sosAlert(alert, trip) {
+      if (!alert) return;
+      const payload = { alert, trip: trip ? serializeTrip(trip) : null };
+      for (const admin of repo.getAllAdmins()) {
+        io.to(`user:${admin.id}`).emit('sos:alert', payload);
+        push.sendToUser(admin.id, {
+          title: alert.userRole === 'driver' ? '🆘 Driver pressed SOS' : '🆘 Customer pressed SOS',
+          body: `${alert.userName || 'A user'} pressed SOS${trip ? ' (trip ' + trip.id + ')' : ''} — check Records now.`,
+          data: { type: 'sos', alertId: alert.id, tripId: trip?.id || null },
+        });
+      }
+    },
+    // Drop a driver's socket(s) outright (e.g. the owner suspends them).
+    kickDriver(driverId) {
+      io.in(`user:${driverId}`).disconnectSockets(true);
+    },
+    // Broadcast to all clients that a driver went offline (UI toggles their pin).
+    forceOffline(driverId) {
+      io.emit('driver:status:update', { driverId, isOnline: false });
     },
     tripArrived(trip) {
       if (!trip) return;

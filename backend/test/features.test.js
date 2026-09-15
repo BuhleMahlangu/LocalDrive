@@ -65,10 +65,11 @@ test('scheduled trip is created with status scheduled and stays out of the reque
   const upcoming = repo.getScheduledTripsForDriver();
   assert.ok(upcoming.some((t) => t.id === trip.id));
 
-  // Activating hands it to the request queue.
-  const activated = tripService.activateScheduledTrip(trip.id);
-  assert.equal(activated.status, 'requested');
-  assert.equal(repo.getLatestRequestedTrip().id, trip.id);
+  // Activating claims the scheduled ride for the activating driver.
+  const activated = tripService.activateScheduledTrip(trip.id, driver.id);
+  assert.equal(activated.status, 'accepted');
+  assert.equal(activated.driverId, driver.id);
+  assert.equal(repo.getLatestRequestedTrip(), null, 'claimed trip is not an open request');
 });
 
 test('a scheduled trip can be cancelled before it is activated', async () => {
