@@ -124,6 +124,60 @@ test('public pickup spots are listed', async () => {
   assert.equal(res.json.spots[0].id, 'spot_kriel_town');
 });
 
+test('pickup spot management is admin-only (CRUD on /api/admin/spots)', async () => {
+  const admin = ensureAdmin();
+  const driver = ensureDriver();
+
+  // Gating: anonymous gets 401, a driver gets 403, the owner gets 200.
+  const anon = await api('GET', '/api/admin/spots');
+  assert.equal(anon.status, 401);
+  const forbidden = await api('GET', '/api/admin/spots', null, driver.token);
+  assert.equal(forbidden.status, 403);
+  const list = await api('GET', '/api/admin/spots', null, admin.token);
+  assert.equal(list.status, 200);
+  const ids = list.json.spots.map((s) => s.id);
+  assert.ok(ids.includes('spot_kriel_town'), 'seeded spot visible to admin');
+
+  // Create requires name + numeric lat/lng.
+  const bad = await api('POST', '/api/admin/spots', { name: 'Broken' }, admin.token);
+  assert.equal(bad.status, 400);
+  const created = await api('POST', '/api/admin/spots', {
+    name: 'Test spot A', lat: -26.2, lng: 29.3,
+  }, admin.token);
+  assert.equal(created.status, 201);
+  assert.ok(created.json.spot.id);
+  assert.equal(created.json.spot.name, 'Test spot A');
+  assert.equal(created.json.spot.lat, -26.2);
+
+  // Rename + move (PUT).
+  const renamed = await api('PUT', `/api/admin/spots/${created.json.spot.id}`, { name: 'Test spot B' }, admin.token);
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.json.spot.name, 'Test spot B');
+  const moved = await api('PUT', `/api/admin/spots/${created.json.spot.id}`, { lat: -26.22, lng: 29.33 }, admin.token);
+  assert.equal(moved.status, 200);
+  assert.equal(moved.json.spot.lat, -26.22);
+
+  // Unknown id on PUT/DELETE -> 404.
+  const missingPut = await api('PUT', '/api/admin/spots/spot_nope', { name: 'x' }, admin.token);
+  assert.equal(missingPut.status, 404);
+  const missingDel = await api('DELETE', '/api/admin/spots/spot_nope', null, admin.token);
+  assert.equal(missingDel.status, 404);
+
+  // Delete removes it from the admin list.
+  const deleted = await api('DELETE', `/api/admin/spots/${created.json.spot.id}`, null, admin.token);
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.json.ok, true);
+  const after = await api('GET', '/api/admin/spots', null, admin.token);
+  assert.ok(!after.json.spots.some((s) => s.id === created.json.spot.id), 'deleted spot gone');
+
+  // Drivers can still list spots read-only, but never write.
+  const driverList = await api('GET', '/api/driver/spots', null, driver.token);
+  assert.equal(driverList.status, 200);
+  assert.ok(Array.isArray(driverList.json.spots));
+  const driverWrite = await api('POST', '/api/driver/spots', { name: 'x', lat: -26.2, lng: 29.3 }, driver.token);
+  assert.equal(driverWrite.status, 404, 'driver write route no longer exists');
+});
+
 test('auth: unauthenticated customer routes are rejected', async () => {
   const res = await api('GET', '/api/customer/places');
   assert.equal(res.status, 401);
