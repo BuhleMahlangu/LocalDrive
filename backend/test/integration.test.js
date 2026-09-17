@@ -61,8 +61,8 @@ async function api(method, path, body, token) {
   return { status: res.status, json };
 }
 
-// Request an OTP, read the stored code straight from the DB (dev/test helper),
-// verify it, and return the issued token.
+// Request an OTP, verify it with the dev/test convenience code, and return the
+// issued token. (Test env uses the fixed code '123456'; the DB only holds a hash.)
 async function login(phone, role, name, email) {
   const req = await api('POST', '/api/auth/otp/request', { phone, role });
   assert.equal(req.status, 200, `otp request ok for ${phone} (${role})`);
@@ -70,7 +70,7 @@ async function login(phone, role, name, email) {
   const row = repo.getOtp(normalized);
   assert.ok(row, `otp row stored for ${phone}`);
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code: row.code, role, name, email,
+    phone, code: '123456', role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
   assert.equal(res.json.success, true);
@@ -196,8 +196,9 @@ test('auth: a stranger can apply as a driver (pending)', async () => {
   assert.equal(req.status, 200);
   const normalized = '+27829999999';
   const row = repo.getOtp(normalized);
+  assert.ok(row, 'otp row stored');
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone: normalized, code: row.code, role: 'driver',
+    phone: normalized, code: '123456', role: 'driver',
   });
   assert.equal(res.status, 200);
   assert.equal(res.json.user.role, 'driver');
@@ -739,4 +740,73 @@ test('admin trip-record audit: search by customer/driver name, status, date, and
 
   const missing = await api('GET', '/api/admin/trips/does-not-exist', null, admin.token);
   assert.equal(missing.status, 404);
+});
+
+test('promo code discount: shown in preview, applied to final fare + payment, consumed once', async () => {
+  const driver = ensureDriver();
+  await api('POST', '/api/driver/online', { isOnline: true }, driver.token);
+  const customer = await login('+27730007777', 'customer', 'Palesa', 'p@x.za');
+
+  // Preview shows the discount against the undiscounted subtotal.
+  const est = await api('POST', '/api/customer/estimate', {
+    pickup: PICKUP, destination: DEST, promoCode: 'WELCOME10',
+  });
+  assert.equal(est.status, 200);
+  const { estimate } = est.json;
+  assert.equal(estimate.promoCode, 'WELCOME10');
+  assert.equal(estimate.promoPercent, 10);
+  assert.ok(estimate.discount > 0, 'discount is positive');
+  assert.equal(estimate.subtotal, Math.round((estimate.total + estimate.discount) * 100) / 100);
+
+  const booked = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash', promoCode: 'WELCOME10',
+  }, customer.token);
+  assert.equal(booked.status, 201);
+  const tripId = booked.json.trip.id;
+  assert.equal(booked.json.trip.promoCode, 'WELCOME10');
+  assert.equal(booked.json.trip.promoPercent, 10);
+  assert.equal(booked.json.trip.fareEstimate, estimate.subtotal, 'fare_estimate keeps the undiscounted subtotal');
+  assert.equal(booked.json.estimate.total, estimate.total, 'booking preview matches the estimate preview');
+
+  await api('POST', `/api/driver/trips/${tripId}/accept`, {}, driver.token);
+  await api('POST', `/api/driver/trips/${tripId}/start`, {}, driver.token);
+  const complete = await api('POST', `/api/driver/trips/${tripId}/complete`, {
+    actualDistanceKm: booked.json.trip.distanceKm,
+    actualDurationMin: booked.json.trip.durationMin,
+    tipAmount: 0,
+  }, driver.token);
+  assert.equal(complete.json.trip.status, 'completed');
+  assert.ok(Math.abs(complete.json.trip.finalFare - estimate.total) < 0.05,
+    `final fare R${complete.json.trip.finalFare} honours the R${estimate.discount} discount (expected ~R${estimate.total})`);
+  assert.equal(complete.json.payment.amountCents, Math.round(complete.json.trip.finalFare * 100), 'cash payment matches discounted fare');
+
+  // A tip on top keeps the discount intact and re-settles the cash payment.
+  const rated = await api('POST', `/api/customer/trips/${tripId}/rate`, { stars: 5, tipAmount: 10 }, customer.token);
+  assert.equal(rated.status, 200);
+  assert.equal(rated.json.trip.tipAmount, 10);
+  assert.ok(Math.abs(rated.json.trip.finalFare - (complete.json.trip.finalFare + 10)) < 0.06, 'tip adds on top of the discounted fare');
+  const settled = repo.getPaymentByTrip(tripId);
+  assert.equal(settled.amountCents, Math.round(rated.json.trip.finalFare * 100));
+
+  // Immediate bookings consume the promo once.
+  assert.equal(repo.getPromoByCode('WELCOME10').used_count, 1);
+});
+
+test('scheduled trips hold a promo until activation, then consume it', async () => {
+  const driver = ensureDriver();
+  const customer = await login('+27730008888', 'customer', 'Nomsa', 'n@x.za');
+
+  const before = repo.getPromoByCode('WELCOME10').used_count;
+  const booked = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+    scheduledAt: '2099-01-01T08:00:00Z', promoCode: 'WELCOME10',
+  }, customer.token);
+  assert.equal(booked.status, 201);
+  const tripId = booked.json.trip.id;
+  assert.equal(booked.json.trip.promoCode, 'WELCOME10');
+  assert.equal(repo.getPromoByCode('WELCOME10').used_count, before, 'scheduled booking does NOT consume the promo yet');
+
+  await api('POST', '/api/driver/online', { isOnline: true }, driver.token);
+  await api('POST', `/api/driver/trips/${tripId}/activate`, {}, driver.token);
+  assert.equal(repo.getPromoByCode('WELCOME10').used_count, before + 1, 'promo consumed once on activation');
 });

@@ -1,10 +1,11 @@
 openapi: 3.0.3
 info:
   title: DriveLocal API
-  version: 0.3.0
+  version: 0.4.0
   description: |
-    Backend for the single-driver ride-booking app serving the Kriel /
-    Thubelihle area in ZAR. One owner-driver, booked by customers via SMS-OTP.
+    Backend for the community micro-transit ride-booking app serving the Kriel /
+    Thubelihle area in ZAR. Multiple vetted drivers are dispatched; customers sign
+    in with SMS OTP and can pay cash or by Yoco card.
 
     Auth: request an OTP, then verify it to receive a `token` (JWT). Send the
     token as `Authorization: Bearer <token>` on role-gated routes. The owner
@@ -22,9 +23,15 @@ tags:
   - name: Customer
     description: Customer-facing booking flow
   - name: Driver
-    description: Owner-driver operations
+    description: Driver operations + vetting
+  - name: Admin
+    description: Platform-owner administration
   - name: Payments
     description: Yoco card payments
+  - name: Chat
+    description: In-trip messaging between participants
+  - name: SOS
+    description: Emergency alerts
   - name: Push
     description: Web push subscriptions
 
@@ -60,9 +67,11 @@ components:
       properties:
         id: { type: string }
         phone: { type: string }
-        role: { type: string, enum: [customer, driver] }
+        role: { type: string, enum: [customer, driver, admin] }
         name: { type: string, nullable: true }
         email: { type: string, nullable: true }
+        driverStatus: { type: string, nullable: true, enum: [pending, approved, rejected, suspended] }
+        rejectionReason: { type: string, nullable: true }
     AuthOk:
       type: object
       properties:
@@ -217,6 +226,62 @@ components:
         avgWaitMin: { type: integer }
         totalTrips: { type: integer }
         completedTrips: { type: integer }
+    Wallet:
+      type: object
+      properties:
+        availableCents: { type: integer }
+        owedCents: { type: integer }
+        updatedAt: { type: string, nullable: true }
+    Application:
+      type: object
+      nullable: true
+      properties:
+        driverId: { type: string }
+        idNumber: { type: string }
+        idCopyUrl: { type: string, nullable: true }
+        selfieUrl: { type: string, nullable: true }
+        proofOfResidenceUrl: { type: string, nullable: true }
+        submittedAt: { type: string }
+        reviewedAt: { type: string, nullable: true }
+        rejectionReason: { type: string, nullable: true }
+    Spot:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        category: { type: string }
+        address: { type: string, nullable: true }
+        lat: { type: number }
+        lng: { type: number }
+        note: { type: string, nullable: true }
+        sort: { type: integer, nullable: true }
+        active: { type: integer }
+    AdminDriver:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        application: { $ref: '#/components/schemas/Application' }
+        wallet: { $ref: '#/components/schemas/Wallet' }
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string }
+        tripId: { type: string }
+        senderId: { type: string }
+        body: { type: string }
+        createdAt: { type: string }
+        readAt: { type: string, nullable: true }
+    SosAlert:
+      type: object
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        role: { type: string }
+        tripId: { type: string, nullable: true }
+        note: { type: string }
+        lat: { type: number, nullable: true }
+        lng: { type: number, nullable: true }
+        createdAt: { type: string }
 
 paths:
   /health:
@@ -584,22 +649,6 @@ paths:
         - { in: path, name: id, required: true, schema: { type: string } }
       responses:
         "200": { description: OK }
-  /api/customer/push-token:
-    post:
-      tags: [Customer]
-      summary: Register an FCM push token
-      security: [{ bearerAuth: [] }]
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                token: { type: string }
-                platform: { type: string }
-      responses:
-        "200": { description: OK }
-
   /api/driver/profile:
     put:
       tags: [Driver]
@@ -614,6 +663,58 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "200": { description: OK }
+  /api/driver/application:
+    get:
+      tags: [Driver]
+      summary: Your driver application and vetting status
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role: { type: string }
+                  driverStatus: { type: string, nullable: true }
+                  rejectionReason: { type: string, nullable: true }
+                  application: { $ref: '#/components/schemas/Application' }
+  /api/driver/register:
+    post:
+      tags: [Driver]
+      summary: Submit (or resubmit) a driver application with vetting documents
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [idNumber]
+              properties:
+                idNumber: { type: string, description: "Valid 13-digit SA ID number" }
+                idCopy: { type: string, format: binary }
+                selfie: { type: string, format: binary }
+                proofOfResidence: { type: string, format: binary }
+      responses:
+        "201": { description: Application created or updated }
+        "400": { description: Missing / invalid SA ID number }
+        "403": { description: Only drivers can apply }
+  /api/driver/wallet:
+    get:
+      tags: [Driver]
+      summary: Driver wallet balance
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet: { $ref: '#/components/schemas/Wallet' }
   /api/driver/online:
     post:
       tags: [Driver]
@@ -903,6 +1004,250 @@ paths:
       security: [{ bearerAuth: [] }]
       responses:
         "200": { description: OK }
+
+  /api/admin/drivers:
+    get:
+      tags: [Admin]
+      summary: Every driver account + vetting application + wallet
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drivers:
+                    type: array
+                    items: { $ref: '#/components/schemas/AdminDriver' }
+  /api/admin/drivers/{id}/application:
+    get:
+      tags: [Admin]
+      summary: Full vetting detail for one driver
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driver: { $ref: '#/components/schemas/User' }
+                  application: { $ref: '#/components/schemas/Application' }
+                  wallet: { $ref: '#/components/schemas/Wallet' }
+  /api/admin/drivers/{id}/approve:
+    post:
+      tags: [Admin]
+      summary: Approve a pending driver application
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Approved }
+        "409": { description: Vetting documents not submitted yet }
+  /api/admin/drivers/{id}/reject:
+    post:
+      tags: [Admin]
+      summary: Reject a driver application
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200": { description: Rejected }
+  /api/admin/drivers/{id}/suspend:
+    post:
+      tags: [Admin]
+      summary: Suspend a driver (forces offline and kicks them out of the app)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Suspended }
+        "409": { description: Cannot suspend the platform owner }
+  /api/admin/drivers/{id}/unsuspend:
+    post:
+      tags: [Admin]
+      summary: Reinstate a suspended driver
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Approved again }
+  /api/admin/trips/search:
+    get:
+      tags: [Admin]
+      summary: Search trip records by customer/driver + optional date range and status
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trips:
+                    type: array
+                    items: { type: object }
+                  count: { type: integer }
+  /api/admin/trips/{id}:
+    get:
+      tags: [Admin]
+      summary: Full audit record for a trip (route, payment, chat thread)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Trip not found }
+  /api/admin/spots:
+    get:
+      tags: [Admin]
+      summary: List all pickup spots (active and inactive)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  spots:
+                    type: array
+                    items: { $ref: '#/components/schemas/Spot' }
+    post:
+      tags: [Admin]
+      summary: Create a pickup spot
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertSpotBody' }
+      responses:
+        "201": { description: Created }
+  /api/admin/spots/{id}:
+    put:
+      tags: [Admin]
+      summary: Update a pickup spot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpsertSpotBody' }
+      responses:
+        "200": { description: Updated }
+        "404": { description: Spot not found }
+    delete:
+      tags: [Admin]
+      summary: Delete a pickup spot
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Deleted }
+        "404": { description: Spot not found }
+
+  /api/sos:
+    post:
+      tags: [SOS]
+      summary: Record an emergency SOS alert (any authenticated user)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tripId: { type: string, nullable: true }
+                note: { type: string }
+                lat: { type: number, nullable: true }
+                lng: { type: number, nullable: true }
+      responses:
+        "201":
+          description: Alert recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  alert: { $ref: '#/components/schemas/SosAlert' }
+
+  /api/chat/trips/{tripId}/messages:
+    get:
+      tags: [Chat]
+      summary: List in-trip messages (opens the thread and marks it read)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: tripId, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChatMessage' }
+    post:
+      tags: [Chat]
+      summary: Send an in-trip message
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: tripId, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 2000 }
+      responses:
+        "201": { description: Sent }
+  /api/chat/trips/{tripId}/read:
+    post:
+      tags: [Chat]
+      summary: Mark the message thread as read
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: tripId, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/uploads/{filename}:
+    get:
+      tags: [Driver]
+      summary: View a vetted driver document (owner or admin only)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { in: path, name: filename, required: true, schema: { type: string } }
+      responses:
+        "200": { description: File bytes }
+        "403": { description: Forbidden }
 
   /api/payments/config:
     get:

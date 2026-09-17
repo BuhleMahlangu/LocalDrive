@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS trips (
   fare_estimate  NUMERIC,
   final_fare     NUMERIC,
   price_model    TEXT NOT NULL DEFAULT 'distance_time',
+  promo_code     TEXT,
+  promo_percent  NUMERIC NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash',
   tip_amount     NUMERIC NOT NULL DEFAULT 0,
   rating         INTEGER,
@@ -124,15 +126,6 @@ CREATE TABLE IF NOT EXISTS otps (
   expires_at TIMESTAMPTZ NOT NULL,
   attempts   INTEGER NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- FCM push tokens per user
-CREATE TABLE IF NOT EXISTS push_tokens (
-  user_id    TEXT NOT NULL REFERENCES users(id),
-  token      TEXT NOT NULL,
-  platform   TEXT,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (user_id, token)
 );
 
 -- Web push (VAPID) subscriptions per user

@@ -40,13 +40,15 @@ function customerRoutes({ notify }) {
       if (promoCode) {
         const valid = tripService.validatePromo(promoCode);
         if (valid.ok) {
-          const discount = Math.min(estimate.total - driver.baseFare, Math.round(estimate.total * (valid.promo.discount_percent / 100) * 100) / 100);
+          const discounted = require('../services/pricing').applyPromoDiscount(
+            estimate.subtotal, valid.promo.discount_percent, driver.baseFare,
+          );
           estimate = {
             ...estimate,
-            discount,
+            discount: discounted.discount,
             promoCode: valid.promo.code.toUpperCase(),
             promoPercent: valid.promo.discount_percent,
-            total: Math.round((estimate.total - discount) * 100) / 100,
+            total: discounted.total,
           };
         }
       }
@@ -123,7 +125,7 @@ function customerRoutes({ notify }) {
         pickup, destination, priceModel,
         paymentMethod,
         scheduledAt: scheduledAt || null,
-        promoCode: promo?.code,
+        promoCode: promo?.promo?.code || null,
       });
 
       // Track recent destinations for the one-tap rebook bar.
@@ -237,23 +239,7 @@ function customerRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Register FCM push token (for later real push notifications).
-  router.post('/push-token', (req, res) => {
-    const { token, platform } = req.body;
-    if (!token) return res.status(400).json({ error: 'token required' });
-    dbPush(req.user.id, token, platform);
-    res.json({ ok: true });
-  });
-
   return router;
-}
-
-function dbPush(userId, token, platform) {
-  const db = repo.db;
-  db.prepare(
-    `INSERT INTO push_tokens (user_id, token, platform) VALUES (?, ?, ?)
-     ON CONFLICT(user_id, token) DO UPDATE SET platform = excluded.platform, updated_at = datetime('now')`,
-  ).run(userId, token, platform || null);
 }
 
 module.exports = customerRoutes;

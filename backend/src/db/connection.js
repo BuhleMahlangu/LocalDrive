@@ -101,6 +101,8 @@ CREATE TABLE IF NOT EXISTS trips (
   fare_estimate  REAL,
   final_fare     REAL,
   price_model    TEXT NOT NULL DEFAULT 'distance_time',
+  promo_code     TEXT,
+  promo_percent  REAL NOT NULL DEFAULT 0,
   payment_method TEXT NOT NULL DEFAULT 'cash',
   tip_amount     REAL NOT NULL DEFAULT 0,
   rating         INTEGER,
@@ -136,14 +138,6 @@ CREATE TABLE IF NOT EXISTS otps (
   expires_at TEXT NOT NULL,
   attempts   INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS push_tokens (
-  user_id    TEXT NOT NULL,
-  token      TEXT NOT NULL,
-  platform   TEXT,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (user_id, token)
 );
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -265,6 +259,8 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   ensureColumn('trips', 'arrived_at', 'TEXT');
   ensureColumn('trips', 'fare_confirmed_at', 'TEXT');
   ensureColumn('payments', 'redirect_url', 'TEXT');
+  ensureColumn('trips', 'promo_code', 'TEXT');
+  ensureColumn('trips', 'promo_percent', "REAL NOT NULL DEFAULT 0");
 
   // ---- Multi-driver platform migrations ----
   ensureColumn('users', 'driver_status', 'TEXT');

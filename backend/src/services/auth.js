@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
@@ -7,6 +8,14 @@ const { makeOtp } = require('../utils/geo');
 
 const OTP_TTL_MIN = 10;
 const MAX_ATTEMPTS = 5;
+
+// OTP codes are stored as a salted SHA-256 hash, never in plaintext. Even if the
+// database leaks, the hash can't be mined offline without the JWT secret (which
+// is already required to be strong in production). Rate limiting on the verify
+// endpoint is what actually stops online brute force.
+function hashOtp(phone, code) {
+  return crypto.createHash('sha256').update(`${phone}:${String(code)}:${config.jwtSecret}`).digest('hex');
+}
 
 async function requestOtp({ phone, role: _role }) {
   if (!/^\+?\d{9,15}$/.test(phone)) {
@@ -31,12 +40,13 @@ async function requestOtp({ phone, role: _role }) {
     throw err;
   }
 
-  // The convenience fixed code is only for local development. Any other
-  // environment generates a random OTP, which is then delivered by `sms.send`.
-  const code = config.nodeEnv === 'development' ? '123456' : makeOtp();
+  // A fixed convenience code is only for development/test environments. Any
+  // other environment generates a random OTP, which is then delivered by
+  // `sms.send` and stored as a hash.
+  const code = config.nodeEnv === 'production' ? makeOtp() : '123456';
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
-  repo.saveOtp(normalized, code, expiresAt);
+  repo.saveOtp(normalized, hashOtp(normalized, code), expiresAt);
   await sms.send({
     to: normalized,
     body: `DriveLocal: your verification code is ${code}. Valid for ${OTP_TTL_MIN} minutes.`,
@@ -88,7 +98,7 @@ function verifyOtp({ phone, code, name, email, role }) {
     repo.deleteOtp(normalized);
     return { success: false, error: 'Too many attempts, request a new code' };
   }
-  if (String(otp.code) !== String(code)) {
+  if (hashOtp(normalized, code) !== otp.code) {
     repo.incrementOtpAttempts(normalized);
     return { success: false, error: 'Incorrect code' };
   }
@@ -120,4 +130,4 @@ function normalizePhone(phone) {
   return p;
 }
 
-module.exports = { requestOtp, verifyOtp, normalizePhone };
+module.exports = { requestOtp, verifyOtp, normalizePhone, hashOtp };

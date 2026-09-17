@@ -93,7 +93,6 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
-| `FCM_SERVER_KEY` | Optional legacy FCM push |
 | `CORS_ORIGINS` | Comma-separated allowed origins (default `http://localhost:5173`) |
 
 OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop SMS-bombing.

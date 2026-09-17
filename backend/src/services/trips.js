@@ -64,7 +64,7 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
   }
 
   const route = await getRoute({ pickup, destination });
-  let estimate = pricing.estimateFare({
+  const fare = pricing.estimateFare({
     baseFare: driver.baseFare,
     perKmRate: driver.perKmRate,
     perMinRate: driver.perMinRate,
@@ -72,19 +72,27 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     durationMin: route.durationMin,
   });
 
-  // Apply a promo discount to the estimate (shown to the customer as a
-  // "promo discount" line in the fare breakdown).
-  let discountAmount = 0;
+  // Apply a promo discount to the *payable* fare. The discounted total is what
+  // the customer sees in the fare breakdown preview and what they actually pay.
+  // `fare_estimate` on the trip keeps the undiscounted subtotal so the receipt
+  // can show the original estimate struck through against the final fare.
   let appliedPromo = null;
+  let discountPercent = 0;
   if (promoCode) {
     const valid = validatePromo(promoCode);
     if (valid.ok) {
-      const p = valid.promo;
-      discountAmount = Math.round(estimate.total * (p.discount_percent / 100) * 100) / 100;
-      estimate = { ...estimate, discount: discountAmount, promoCode: p.code, promoPercent: p.discount_percent };
-      appliedPromo = p;
+      appliedPromo = valid.promo;
+      discountPercent = valid.promo.discount_percent;
     }
   }
+  const discounted = pricing.applyPromoDiscount(fare.subtotal, discountPercent, driver.baseFare);
+  const estimate = {
+    ...fare,
+    discount: discounted.discount,
+    promoCode: appliedPromo ? appliedPromo.code : null,
+    promoPercent: discountPercent,
+    total: discounted.total,
+  };
 
   const trip = repo.createTrip({
     id: uid('trip'),
@@ -96,7 +104,9 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     routePolyline: route.polyline,
     distanceKm: pricing.round(route.distanceKm),
     durationMin: pricing.round(route.durationMin),
-    fareEstimate: pricing.round(estimate.total),
+    fareEstimate: pricing.round(fare.subtotal),
+    promoCode: appliedPromo?.code || null,
+    promoPercent: discountPercent,
     priceModel,
     paymentMethod,
   });
@@ -110,8 +120,16 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
 
 // A driver activating a pre-booked ride claims it for themselves. Returns the
 // trip or null if another driver got there first (atomic guarded claim).
+// Any promo code attached to the scheduled ride is consumed at this point
+// (not when the ride is first booked) to avoid holding a slot on a ride that
+// may never happen.
 function activateScheduledTrip(tripId, driverId) {
-  return repo.activateScheduledTripClaim(tripId, driverId);
+  const trip = repo.activateScheduledTripClaim(tripId, driverId);
+  if (trip && trip.promoCode) {
+    const promo = repo.getPromoByCode(trip.promoCode);
+    if (promo) repo.usePromo(promo.id);
+  }
+  return trip;
 }
 
 // Check geofencing before dispatch: at least one approved driver must be online
@@ -215,20 +233,24 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   }
 
   const driver = repo.getDriver();
-  const estimate = pricing.estimateFare({
+  const fare = pricing.estimateFare({
     baseFare: driver.baseFare,
     perKmRate: driver.perKmRate,
     perMinRate: driver.perMinRate,
     distanceKm: actualDistanceKm ?? trip.distanceKm,
     durationMin: actualDurationMin ?? trip.durationMin,
-    tipAmount: tipAmount ?? trip.tipAmount,
   });
+  // Apply any promo code the customer booked with: the discount applies to the
+  // fare (not the tip), then the tip is added on top.
+  const discounted = pricing.applyPromoDiscount(fare.subtotal, trip.promoPercent, driver.baseFare);
+  const tip = pricing.round(Number(tipAmount ?? trip.tipAmount ?? 0));
+  const total = pricing.round(discounted.total + tip);
 
   const updated = repo.updateTrip(tripId, {
     status: 'completed',
     completed_at: now(),
-    final_fare: estimate.total,
-    tip_amount: estimate.tipAmount,
+    final_fare: total,
+    tip_amount: tip,
     distance_km: actualDistanceKm ?? trip.distanceKm,
     duration_min: actualDurationMin ?? trip.durationMin,
   });
@@ -236,17 +258,17 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   // Create the payment record. Cash trips are settled now (money handed
   // directly to the driver). Card trips stay pending until the customer
   // completes the hosted Yoco checkout.
-  const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
+  const platformFeeCents = Math.round(pricing.dollarsToCents(total) * (platformFeePercent() / 100));
   repo.createPayment({
     tripId,
-    amountCents: pricing.dollarsToCents(estimate.total),
+    amountCents: pricing.dollarsToCents(total),
     provider: trip.paymentMethod === 'card' ? 'yoco' : 'cash',
     currency: config.currency,
   });
 
   if (trip.paymentMethod !== 'card') {
     repo.markPaymentSucceeded(tripId, {
-      driverPayoutCents: pricing.dollarsToCents(estimate.total) - platformFeeCents,
+      driverPayoutCents: pricing.dollarsToCents(total) - platformFeeCents,
       platformFeeCents,
     });
   }
@@ -297,25 +319,27 @@ async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
   }
   if (tipAmount != null) {
     const driver = repo.getDriver();
-    const estimate = pricing.estimateFare({
+    const fare = pricing.estimateFare({
       baseFare: driver.baseFare,
       perKmRate: driver.perKmRate,
       perMinRate: driver.perMinRate,
       distanceKm: trip.distanceKm,
       durationMin: trip.durationMin,
-      tipAmount,
     });
-    repo.updateTrip(tripId, { tip_amount: estimate.tipAmount, final_fare: estimate.total });
+    const discounted = pricing.applyPromoDiscount(fare.subtotal, trip.promoPercent, driver.baseFare);
+    const tip = pricing.round(Number(tipAmount));
+    const total = pricing.round(discounted.total + tip);
+    repo.updateTrip(tripId, { tip_amount: tip, final_fare: total });
     // Keep the payment record in sync with the new total when the trip is
     // cash (card amounts are fixed at checkout time and can't be adjusted
     // retrospectively — a tip on a card trip is informational only).
     const payment = repo.getPaymentByTrip(tripId);
     if (payment && payment.provider === 'cash') {
-      repo.updatePaymentAmount(tripId, pricing.dollarsToCents(estimate.total));
+      repo.updatePaymentAmount(tripId, pricing.dollarsToCents(total));
       if (payment.status !== 'succeeded') {
-        const platformFeeCents = Math.round(pricing.dollarsToCents(estimate.total) * (platformFeePercent() / 100));
+        const platformFeeCents = Math.round(pricing.dollarsToCents(total) * (platformFeePercent() / 100));
         repo.markPaymentSucceeded(tripId, {
-          driverPayoutCents: pricing.dollarsToCents(estimate.total) - platformFeeCents,
+          driverPayoutCents: pricing.dollarsToCents(total) - platformFeeCents,
           platformFeeCents,
         });
       }

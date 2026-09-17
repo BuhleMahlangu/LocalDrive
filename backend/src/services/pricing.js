@@ -21,8 +21,22 @@ function round(n) {
   return Math.round(n * 100) / 100;
 }
 
+// Apply a promo discount to a fare subtotal. The discount is capped so the
+// customer always pays at least the base fare (a ride is never completely free).
+// Shared by the booking preview, trip creation and trip completion so the
+// discount shown up front is exactly what gets charged at the end.
+function applyPromoDiscount(subtotal, discountPercent, baseFare) {
+  const base = Math.max(0, Number(subtotal) || 0);
+  const percent = Number(discountPercent) || 0;
+  if (percent <= 0) return { discount: 0, total: round(base) };
+  const floor = Math.max(0, Number(baseFare) || 0);
+  const raw = round(base * (percent / 100));
+  const discount = round(Math.min(Math.max(0, base - floor), raw));
+  return { discount, total: round(Math.max(0, base - discount)) };
+}
+
 function dollarsToCents(dollars) {
   return Math.round(Number(dollars) * 100);
 }
 
-module.exports = { estimateFare, round, dollarsToCents };
+module.exports = { estimateFare, applyPromoDiscount, round, dollarsToCents };

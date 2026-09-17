@@ -26,15 +26,13 @@ function openDb() {
 }
 
 async function setItem(key, value) {
-  try {
-    const db = await openDb();
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put({ value, savedAt: Date.now() }, key);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } finally { /* offline cache disabled */ }
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put({ value, savedAt: Date.now() }, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 async function getItem(key) {

@@ -1,6 +1,6 @@
 // Small in-memory rate limiter for OTP requests and verify attempts.
 // - Per phone: max MAX_PER_WINDOW requests in WINDOW_MS (prevents SMS-bombing).
-// - Per phone per day: max MAX_PER_DAY (caps the real cost of Twilio messages).
+// - Per phone per day: max MAX_PER_DAY (caps the real cost of OTP SMS messages).
 // - Verify: max MAX_VERIFY_PER_WINDOW attempts per phone per WINDOW_MS.
 
 const WINDOW_MS = 60 * 1000;

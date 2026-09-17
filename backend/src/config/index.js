@@ -43,7 +43,6 @@ const config = {
   dbDriver: process.env.DB_DRIVER || 'sqlite',
   databaseUrl: process.env.DATABASE_URL,
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
-  fcmServerKey: process.env.FCM_SERVER_KEY,
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

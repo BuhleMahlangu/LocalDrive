@@ -47,14 +47,15 @@ async function main() {
   const route = await api('POST', '/api/driver/route', { from: { lat: -26.2041, lng: 28.0473 }, to: { lat: -26.2155, lng: 29.2916 } }, driverToken);
   assert(route.status === 200 && typeof route.json.distanceKm === 'number', 'driver navigation route computed');
 
+  // Spot CRUD is admin-only (the owner-driver logs in with role 'admin').
   console.log('\n[2] Pickup spot management');
-  const made = await api('POST', '/api/driver/spots', { name: 'Smoke Spot', lat: -26.21, lng: 29.28 }, driverToken);
-  assert(made.status === 200 && made.json.spot.id, 'pickup spot created');
-  const moved = await api('PUT', `/api/driver/spots/${made.json.spot.id}`, { lat: -26.22, lng: 29.29 }, driverToken);
+  const made = await api('POST', '/api/admin/spots', { name: 'Smoke Spot', lat: -26.21, lng: 29.28 }, driverToken);
+  assert(made.status === 201 && made.json.spot.id, 'pickup spot created');
+  const moved = await api('PUT', `/api/admin/spots/${made.json.spot.id}`, { lat: -26.22, lng: 29.29 }, driverToken);
   assert(moved.status === 200 && Math.abs(moved.json.spot.lat - -26.22) < 1e-6, 'pickup spot moved');
-  const renamed = await api('PUT', `/api/driver/spots/${made.json.spot.id}`, { name: 'Smoke Spot Renamed' }, driverToken);
+  const renamed = await api('PUT', `/api/admin/spots/${made.json.spot.id}`, { name: 'Smoke Spot Renamed' }, driverToken);
   assert(renamed.status === 200 && renamed.json.spot.name === 'Smoke Spot Renamed', 'pickup spot renamed');
-  const removed = await api('DELETE', `/api/driver/spots/${made.json.spot.id}`, null, driverToken);
+  const removed = await api('DELETE', `/api/admin/spots/${made.json.spot.id}`, null, driverToken);
   assert(removed.status === 200, 'pickup spot deleted');
 
   console.log('\n[2] Customer availability + estimate');

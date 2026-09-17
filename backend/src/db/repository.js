@@ -53,6 +53,8 @@ function mapTrip(row) {
     fareEstimate: row.fare_estimate,
     finalFare: row.final_fare,
     priceModel: row.price_model,
+    promoCode: row.promo_code,
+    promoPercent: row.promo_percent,
     paymentMethod: row.payment_method,
     tipAmount: row.tip_amount,
     rating: row.rating,
@@ -215,7 +217,7 @@ module.exports = {
     if (updates.length) {
       updates.push('updated_at = ?');
       vals.push(now());
-      vals.push(this.getUserById ? id : id);
+      vals.push(id);
       db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...vals);
     }
     return this.getUserById(id);
@@ -424,8 +426,9 @@ module.exports = {
       `INSERT INTO trips
        (id, customer_id, driver_id, status, pickup_address, pickup_lat, pickup_lng,
         pickup_note, dest_address, dest_lat, dest_lng, dest_note, route_polyline,
-        distance_km, duration_min, fare_estimate, price_model, payment_method, scheduled_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        distance_km, duration_min, fare_estimate, price_model, promo_code, promo_percent,
+        payment_method, scheduled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id, data.customerId, data.driverId || null, data.status || 'requested',
       data.pickup?.address, data.pickup?.lat, data.pickup?.lng,
@@ -434,6 +437,7 @@ module.exports = {
       data.destination?.note || null,
       data.routePolyline || null, data.distanceKm || null, data.durationMin || null,
       data.fareEstimate ?? null, data.priceModel || 'distance_time',
+      data.promoCode || null, data.promoPercent || 0,
       data.paymentMethod || 'cash', data.scheduledAt || null,
     );
     return this.getTripById(id);
@@ -673,7 +677,8 @@ module.exports = {
   updateTrip(id, fields) {
     const allowed = ['driver_id', 'status', 'route_polyline', 'distance_km', 'duration_min',
       'fare_estimate', 'final_fare', 'payment_method', 'tip_amount', 'rating', 'feedback_tags', 'cancel_reason', 'cancel_actor',
-      'accepted_at', 'started_at', 'completed_at', 'cancelled_at', 'scheduled_at', 'arrived_at', 'fare_confirmed_at'];
+      'accepted_at', 'started_at', 'completed_at', 'cancelled_at', 'scheduled_at', 'arrived_at', 'fare_confirmed_at',
+      'promo_code', 'promo_percent'];
     const updates = [];
     const vals = [];
     for (const [key, value] of Object.entries(fields)) {
