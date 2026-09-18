@@ -30,8 +30,9 @@ VOLUME ["/data", "/app/backups"]
 
 EXPOSE 4000
 
+# Node 20's built-in fetch is used for the healthcheck (the slim image purges wget/curl).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
-  CMD wget -qO- http://127.0.0.1:4000/health || exit 1
+  CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Seed the owner-driver on every start (idempotent), then run the API.
 CMD ["sh", "-c", "node src/scripts/seed.js && node src/server.js"]

@@ -19,13 +19,14 @@ services:
       NODE_ENV: production
       PORT: 4000
       DB_FILE: /data/drivelocal.sqlite
+      UPLOADS_DIR: /data/uploads
     volumes:
       - drivelocal-data:/data
       - drivelocal-backups:/app/backups
     expose:
       - "4000"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/health"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -61,6 +62,7 @@ services:
     environment:
       NODE_ENV: production
       DB_FILE: /data/drivelocal.sqlite
+      UPLOADS_DIR: /data/uploads
       BACKUP_INTERVAL_HOURS: "${BACKUP_INTERVAL_HOURS:-6}"
       BACKUP_KEEP: "${BACKUP_KEEP:-14}"
       BACKUP_S3_ENDPOINT: "${BACKUP_S3_ENDPOINT:-}"
