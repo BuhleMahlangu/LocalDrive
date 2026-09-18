@@ -25,7 +25,7 @@ REPO_URL="https://github.com/BuhleMahlangu/LocalDrive.git"
 REPO_DIR="/opt/drivelocal"
 
 if [[ -z "$DOMAIN" ]]; then
-  echo ":: APP_DOMAIN is required (e.g. APP_DOMAIN=ride.yourdomain.co.za bash deploy/oracle/setup.sh)"
+  echo ":: APP_DOMAIN is required (e.g. APP_DOMAIN=drivelocal.duckdns.org bash deploy/oracle/setup.sh)"
   exit 1
 fi
 

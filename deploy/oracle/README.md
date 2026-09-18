@@ -19,8 +19,16 @@ always on. It uses the exact container layout from `docker-compose.yml` /
 - Your real `backend/.env` (ClickSend creds, VAPID keys, JWT secret, `DRIVER_PHONE`).
 - A **domain** pointing at the VM's public IP. This is *required*: web push +
   PWA install + geolocation all need HTTPS, and Caddy only issues Let's Encrypt
-  certificates for real domains (it won't for a bare IP). A cheap ~R100-150/yr
-  `.co.za` domain works. Blank `YOCO_*` keeps it cash-only.
+  certificates for real domains (it won't for a bare IP). You have two options:
+
+  **Option A — Free (DuckDNS):** Go to `duckdns.org`, sign in, create a
+  subdomain (e.g. `drivelocal.duckdns.org`) and set its IP to the VM's public
+  IP. No purchase, no card. Caddy's HTTP-01 challenge works because Oracle gives
+  you a real public IP. Blank `YOCO_*` keeps it cash-only.
+
+  **Option B — Nicer name:** Buy a cheap `.co.za` (~R100–150/yr) and point its
+  A record at the VM. Or register for a free `name.eu.org` subdomain at `eu.org`
+  (permanent, real-looking, but takes a few days to approve).
 
 ## 1. Create the VM (OCI Console)
 
@@ -49,8 +57,13 @@ always on. It uses the exact container layout from `docker-compose.yml` /
    - **Add SSH keys**: paste a public key you generated with `ssh-keygen -t ed25519`.
    - Create. Wait for "Running" → copy the **public IP**.
 4. **Reserve the public IP** (Instances → VNIC → IP Addresses → *Create
-   Reserved IP*) so the address doesn't change on stop/start. Then point your
-   domain's **A record** at it.
+   Reserved IP*) so the address doesn't change on stop/start.
+5. **Point a domain at it** (free route):
+   - Go to `duckdns.org` → *Sign in* (any account, no card) → set your
+     subdomain's IP to the VM's public IP. Or use any domain registrar + A
+     record. Caddy reads `APP_DOMAIN` from the compose env — this is the only
+     step you do outside this guide.
+   - Don't skip this: Caddy will not get a Let's Encrypt cert for a bare IP.
 
 ## 2. Get your `backend/.env` onto the box
 
@@ -78,10 +91,10 @@ Copy just the single setup script up (it clones the repo itself):
 scp deploy/oracle/setup.sh ubuntu@<VM-IP>:/tmp/setup.sh
 ```
 
-Then run it with your domain (you uploaded the .env in step 2):
+Then run it with your DuckDNS subdomain (you uploaded the .env in step 2):
 
 ```bash
-APP_DOMAIN=drivelocal.example.co.za DRIVELOCAL_ENV_FILE=/tmp/backend.env \
+APP_DOMAIN=drivelocal.duckdns.org DRIVELOCAL_ENV_FILE=/tmp/backend.env \
   bash /tmp/setup.sh
 ```
 
@@ -89,13 +102,13 @@ The script installs Docker, clones `BuhleMahlangu/LocalDrive`, copies
 `/tmp/backend.env` into place, and runs:
 
 ```bash
-sudo APP_DOMAIN=https://drivelocal.example.co.za docker compose --profile proxy up --build -d
+sudo APP_DOMAIN=https://drivelocal.duckdns.org docker compose --profile proxy up --build -d
 ```
 
 ## 4. Verify
 
 ```
-https://drivelocal.example.co.za/health        -> {"ok":true,...}
+https://drivelocal.duckdns.org/health        -> {"ok":true,...}
 ```
 
 - Sign in as the owner (`DRIVER_PHONE`) → real ClickSend OTP arrives.
