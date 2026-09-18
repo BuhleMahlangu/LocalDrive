@@ -1,5 +1,5 @@
 // @ts-check
-const { defineConfig } = require('@playwright/test');
+import { defineConfig } from '@playwright/test';
 
 // End-to-end smoke tests: boot the real backend (fresh in-memory DB) and the
 // Vite dev server (which proxies /api to :4000), then exercise the login +
@@ -9,7 +9,7 @@ const { defineConfig } = require('@playwright/test');
 //        npm run test:e2e:ci     (fresh servers on ephemeral DB)
 const isCI = !!process.env.CI;
 
-module.exports = defineConfig({
+export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: isCI,
@@ -35,6 +35,10 @@ module.exports = defineConfig({
       timeout: 60_000,
       env: {
         NODE_ENV: 'development',
+        // Owner phone + JWT secret are pinned so the driver login in smoke.spec
+        // is always the platform owner regardless of the dev machine's .env.
+        DRIVER_PHONE: '+27000000000',
+        JWT_SECRET: 'e2e-secret-e2e-secret-e2e-secret-e2e-secret',
         // Fresh DB per run so the smoke assertions start from a clean slate
         // (in CI an ephemeral file, locally the already-running server is used).
         DB_FILE: isCI ? ':memory:' : undefined,

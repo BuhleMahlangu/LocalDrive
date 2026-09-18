@@ -1,5 +1,5 @@
 // @ts-check
-const { test, expect } = require('@playwright/test');
+import { test, expect } from '@playwright/test';
 
 // Owner driver phone + service-area centre (mirrors config on the backend).
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
@@ -16,8 +16,15 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   await login(driver, { role: 'driver', phone: DRIVER_PHONE });
 
   await expect(driver.locator('.dash-header')).toBeVisible();
-  await driver.locator('.switch input[type="checkbox"]').check();
-  await expect(driver.locator('.switch input[type="checkbox"]')).toBeChecked();
+  // The switch input is a visually-hidden checkbox (opacity 0), so click the
+  // visible slider inside its label — the same gesture a real user does. The
+  // driver's real state may have been left online by a previous run, so only
+  // toggle when the switch isn't already on.
+  const onlineSwitch = driver.locator('.switch input[type="checkbox"]');
+  if (!(await onlineSwitch.isChecked())) {
+    await driver.locator('.switch .slider').click();
+    await expect(onlineSwitch).toBeChecked();
+  }
   // Dashboard poll fires on /driver/online + socket connect; give it a beat.
   await expect(driver.locator('.online-panel')).toContainText('online');
 
@@ -31,14 +38,40 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   const cust = await custCtx.newPage();
   await login(cust, { role: 'customer', phone: '+27123456789', name: 'Thandi' });
 
+  // The backend server may be reused across local runs (config reuses an
+  // already-running server), so a previously accepted trip can still be "active".
+  // Leave a clean slate: cancel any leftover active trip before booking.
+  await cust.evaluate(async () => {
+    const api = async (path, opts = {}) => {
+      const res = await fetch(`/api${path}`, {
+        ...opts,
+        headers: { ...opts.headers, Authorization: `Bearer ${localStorage.getItem('drivelocal_token')}` },
+      });
+      return res.json();
+    };
+    try {
+      const { trip } = await api('/customer/trips/active');
+      if (trip && trip.status !== 'completed' && trip.status !== 'cancelled') {
+        await api(`/customer/trips/${trip.id}/cancel`, { method: 'POST', body: JSON.stringify({ reason: 'Test cleanup' }), headers: { 'Content-Type': 'application/json' } });
+      }
+    } catch { /* ignore */ }
+  });
+
   await expect(cust.locator('.topbar')).toBeVisible();
   await cust.locator('.book-hero .btn.primary.big').click();
   await expect(cust.locator('.leaflet-container')).toBeVisible();
 
   // Pickup: tap the first green pickup-spot marker (sets a real spot in-area).
-  const marker = cust.locator('.leaflet-marker-icon').first();
+  // The map sits below the fold, so scroll it into view first. Leaflet's
+  // divIcon markers trip Playwright's hit-target check (the inner dot is the
+  // paint target inside the interactive wrapper), so click by raw screen
+  // coordinates — the browser targets the dot, which bubbles to the Leaflet
+  // marker handler that selects the pickup spot.
+  const marker = cust.locator('.leaflet-marker-icon.spot-icon').first();
   await expect(marker).toBeVisible();
-  await marker.click();
+  await marker.scrollIntoViewIfNeeded();
+  const spotBox = await marker.boundingBox();
+  await cust.mouse.click(spotBox.x + spotBox.width / 2, spotBox.y + spotBox.height / 2);
   // The pickup address field (first readonly input) fills with the spot name.
   await expect(cust.locator('label.field input[readonly]').first()).not.toHaveValue('');
 
@@ -58,14 +91,14 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   await cust.locator('.modal-card .btn.primary.big').click();
 
   // Customer is now on the active-trip screen waiting for the driver.
-  await expect(cust.locator('.book-header h1')).toHaveText('Booking requested');
+  await expect(cust.locator('.book-header h1').filter({ visible: true })).toHaveText('Booking requested');
 
   // ---- driver accepts within the 10s auto-decline window ----
   const accept = driver.locator('.request-overlay .btn.primary, .request-card .btn.primary').first();
   await accept.click({ timeout: 15_000 });
 
   // Customer's ActiveTrip flips to accepted via socket.
-  await expect(cust.locator('.book-header h1')).toHaveText('Driver on the way', { timeout: 15_000 });
+  await expect(cust.locator('.book-header h1').filter({ visible: true })).toHaveText('Driver on the way', { timeout: 15_000 });
   await expect(cust.locator('.trip-card')).toContainText('on the way');
 
   await custCtx.close();

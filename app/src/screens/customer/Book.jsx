@@ -203,7 +203,10 @@ export default function Book({ onBack, onRequest, presetDest }) {
     setLocateError(false);
   }, []);
 
-  const onSpotClick = useCallback((m) => applySpot(m.spot), [applySpot]);
+  // Map gives us the pinned object directly (spot, or the marker descriptor when
+  // there is no stored spot), so unwrap .spot defensively and fall back to the
+  // object itself.
+  const onSpotClick = useCallback((m) => applySpot(m.spot || m), [applySpot]);
 
   // Tapping the map sets / re-adjusts whichever pin is active. This lets the
   // customer fix a wrongly-placed pickup or destination by tapping again.

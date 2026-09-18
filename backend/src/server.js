@@ -8,7 +8,14 @@ const { initSocket } = require('./socket');
 const server = http.createServer();
 const { notify } = initSocket(server, config.corsOrigins);
 const app = createApp({ notify });
-server.on('request', app);
+// engine.io owns /socket.io (its listener is prepended on the same server) and
+// answers long-polling requests asynchronously. Forwarding those to Express too
+// would race with engine.io's delayed writeHead and crash the worker, so only
+// non-socket.io traffic goes to Express.
+server.on('request', (req, res) => {
+  if (String(req.url).startsWith('/socket.io')) return;
+  app(req, res);
+});
 
 server.listen(config.port, () => {
   console.log(`DriveLocal backend listening on http://localhost:${config.port}`);
