@@ -3,11 +3,13 @@ const path = require('path');
 const multer = require('multer');
 
 // Driver vetting documents (ID copy, selfie, proof of residence) are stored on
-// local disk under backend/data/uploads. Filenames are prefixed with the
-// driver id so file-level access control is trivial: only the owning driver or
-// an admin may read them (see routes/uploads.js).
-
-const UPLOADS_DIR = path.join(__dirname, '..', '..', 'data', 'uploads');
+// local disk, defaulting to backend/data/uploads. Filenames are prefixed with
+// the driver id so file-level access control is trivial: only the owning driver
+// or an admin may read them (see routes/uploads.js). Deployments that mount a
+// persistent volume (e.g. the /data volume in the Dockerfile) can point
+// UPLOADS_DIR there so uploads survive redeploys, mirroring how DB_FILE is
+// redirected.
+const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, '..', '..', 'data', 'uploads');
 
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
