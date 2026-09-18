@@ -8,11 +8,13 @@
 #
 # What it does:
 #   1. Installs Docker Engine + compose plugin (no sudo group dance if already set).
-#   2. Clones the repo to /opt/drivelocal (idempotent; updates if present).
-#   3. Creates backend/.env from your local .env — the secrets MUST exist already,
+#   2. Opens the OS-level firewall (iptables) for ports 80/443 — Oracle's Ubuntu
+#      image blocks them by default even after the VCN security list is opened.
+#   3. Clones the repo to /opt/drivelocal (idempotent; updates if present).
+#   4. Creates backend/.env from your local .env — the secrets MUST exist already,
 #      either as the real backend/.env placed next to this script, or as
 #      DRIVELOCAL_ENV_FILE pointing at your local backend/.env.
-#   4. Starts `docker compose` with the Caddy HTTPS proxy + backup service.
+#   5. Starts `docker compose` with the Caddy HTTPS proxy + backup service.
 #
 # After it finishes: https://<your-domain> is live.
 
@@ -27,14 +29,25 @@ if [[ -z "$DOMAIN" ]]; then
   exit 1
 fi
 
-echo "==> (1/4) Docker Engine"
+echo "==> (1/5) Docker Engine"
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sudo sh
 fi
 sudo systemctl enable --now docker
 sudo docker compose version >/dev/null 2>&1 || sudo apt-get install -y docker-compose-plugin
 
-echo "==> (2/4) Repo at $REPO_DIR"
+echo "==> (2/5) Open OS firewall for HTTP/HTTPS"
+# Oracle's Ubuntu image ships iptables rules that drop 80/443 even after the VCN
+# security list is opened. Insert the ACCEPT rules at the top (before any DROP).
+for port in 80 443; do
+  sudo iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null ||
+    sudo iptables -I INPUT -p tcp --dport "$port" -j ACCEPT
+done
+# Persist across reboots (install netfilter-persistent if missing).
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent >/dev/null 2>&1 || true
+sudo netfilter-persistent save >/dev/null 2>&1 || true
+
+echo "==> (3/5) Repo at $REPO_DIR"
 sudo mkdir -p "$REPO_DIR"
 if [[ -d "$REPO_DIR/.git" ]]; then
   sudo git -C "$REPO_DIR" pull --ff-only
@@ -42,7 +55,7 @@ else
   sudo git clone "$REPO_URL" "$REPO_DIR"
 fi
 
-echo "==> (3/4) backend/.env"
+echo "==> (4/5) backend/.env"
 # Precedence: DRIVELOCAL_ENV_FILE > backend/.env next to script > nothing.
 ENV_SRC="${DRIVELOCAL_ENV_FILE:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,7 +70,7 @@ fi
 sudo cp "$ENV_SRC" "$REPO_DIR/backend/.env"
 sudo chmod 600 "$REPO_DIR/backend/.env"
 
-echo "==> (4/4) Compose up (app + caddy + backup)"
+echo "==> (5/5) Compose up (app + caddy + backup)"
 cd "$REPO_DIR"
 sudo APP_DOMAIN="https://$DOMAIN" docker compose --profile proxy up --build -d
 

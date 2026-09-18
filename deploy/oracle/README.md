@@ -32,6 +32,14 @@ always on. It uses the exact container layout from `docker-compose.yml` /
    **Ingress rules** to its security list (required for Caddy):
    - Ingress TCP `80` from `0.0.0.0/0`
    - Ingress TCP `443` from `0.0.0.0/0`
+   (SSH `22` is usually there by default. Oracle also ships a *second* firewall
+   inside the VM that blocks 80/443 — `setup.sh` opens that automatically, so
+   you only deal with the VCN here.)
+
+   **Region + capacity:** pick `af-johannesburg-1` for SA. Ampere (ARM) capacity
+   is occasionally "out of stock" — if the shape won't launch, retry later or try
+   another availability domain. Your home region is permanent; you can't change
+   it after signup — choose carefully.
 3. **Create Compute → Instance**:
    - Image: **Ubuntu 24.04** (Canonical) — or Oracle Linux 8 for Oracle-first.
    - Shape: "Specialty and Legacy" → **AMD** → `VM.Standard.E2.1.Micro` is the
