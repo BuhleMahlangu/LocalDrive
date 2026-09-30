@@ -7,10 +7,11 @@ import ThemeToggle from '../components/ThemeToggle.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
 import Onboarding, { hasSeenOnboarding } from '../components/Onboarding.jsx';
-import { LangToggle } from '../i18n.jsx';
+import { LangToggle, useI18n } from '../i18n.jsx';
 import { isDriverUser, api } from '../api.js';
 
 export default function CustomerShell({ user, onLogout, onSwitchRole }) {
+  const { t } = useI18n();
   const [view, setView] = useState('home');
   const [activeTrip, setActiveTrip] = useState(null);
   const [rebookDest, setRebookDest] = useState(null);
@@ -78,13 +79,13 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
         <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /></span>
         <span className="user-chip">{user.name || user.phone}</span>
         {canBeDriver && (
-          <button className="chip-btn" onClick={() => onSwitchRole('driver')} title="Open driver dashboard">
-            <Icon name="swap" size={14} /> Driver mode
+          <button className="chip-btn" onClick={() => onSwitchRole('driver')} title={t('common.driverMode')}>
+            <Icon name="swap" size={14} /> {t('common.driverMode')}
           </button>
         )}
         <ThemeToggle />
         <LangToggle />
-        <button className="link-btn" onClick={onLogout}>Log out</button>
+        <button className="link-btn" onClick={onLogout}>{t('common.logout')}</button>
       </header>
 
       <div style={{ display: view === 'home' ? undefined : 'none' }}>
@@ -108,6 +109,7 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
           <Book
             user={user}
             presetDest={rebookDest}
+            visible={view === 'book'}
             onBack={goHome}
             onRequest={(trip) => { setRebookDest(null); openActive(trip); }}
             onResume={resumeActive}

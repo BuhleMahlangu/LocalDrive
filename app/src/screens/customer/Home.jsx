@@ -4,19 +4,8 @@ import NotificationsToggle from '../../components/NotificationsToggle.jsx';
 import SavedPlacesBar from '../../components/SavedPlaces.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import Icon from '../../components/Icon.jsx';
+import { etaMinutes } from '../../lib/geo.js';
 import { useI18n } from '../../i18n.jsx';
-
-// Straight-line time estimate to the pickup, matching the fare model
-// (2 min/km + 5 min) so the ETA tracks the driver live as they approach.
-function haversineKm(aLat, aLng, bLat, bLng) {
-  const R = 6371, dLat = (bLat - aLat) * Math.PI / 180, dLng = (bLng - aLng) * Math.PI / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(h));
-}
-function etaMin(loc, pickup) {
-  if (!loc || !pickup) return null;
-  return Math.max(1, Math.round(haversineKm(loc.lat, loc.lng, pickup.lat, pickup.lng) * 2 + 5));
-}
 
 export default function Home({ user, onBook, onResume, onRebook, onPickPlace, refreshKey = 0 }) {
   const { t } = useI18n();
@@ -24,7 +13,6 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
   const [recentTrip, setRecentTrip] = useState(null);
   const [upcoming, setUpcoming] = useState([]);
   const [active, setActive] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [driverLoading, setDriverLoading] = useState(true);
   const [recentLoading, setRecentLoading] = useState(true);
   // Live driver-ETA on the active-trip card (no need to open ActiveTrip).
@@ -70,7 +58,6 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
     }).catch(() => {}).finally(() => setRecentLoading(false));
     api('/customer/trips/active').then((r) => setActive(r.trip || null)).catch(() => {});
     loadUpcoming();
-    setLoading(false);
   }, [refreshKey]);
 
   async function cancelScheduled(t) {
@@ -101,7 +88,7 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
             {active.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {active.destination?.address || 'Destination'}
           </p>
           {driverLoc ? (
-            <p className="active-eta">🚗 Driver arriving in ~{etaMin(driverLoc, active.pickup)} min</p>
+            <p className="active-eta">🚗 Driver arriving in ~{etaMinutes(driverLoc, active.pickup)} min</p>
           ) : (
             <p className="hint">{active.status === 'accepted' ? 'Tracking driver…' : 'Heading to your destination'}</p>
           )}
@@ -129,12 +116,10 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
 
       <div className="card">
         <h3>{t('home.savedPlaces')}</h3>
-        {loading ? (
-          <Skeleton lines={1} style={{ marginTop: 8 }} />
-        ) : (
-          <SavedPlacesBar onPick={onPickPlace} />
-        )}
-        {!loading && !recentTrip && (
+        {/* SavedPlacesBar fetches its own list and renders nothing until it
+            has data, so no page-level skeleton is needed here. */}
+        <SavedPlacesBar onPick={onPickPlace} active="destination" />
+        {!recentTrip && (
           <p className="hint" style={{ margin: '8px 0 0' }}>{t('home.tapToBook')}</p>
         )}
       </div>

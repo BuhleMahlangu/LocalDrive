@@ -78,8 +78,8 @@ export default function Analytics() {
         <div className="stat-tile"><span className="stat-num">{data.completedTrips}</span><span className="stat-label">Completed</span></div>
         <div className="stat-tile"><span className="stat-num">{data.acceptanceRate}%</span><span className="stat-label">Acceptance</span></div>
         <div className="stat-tile"><span className="stat-num">{data.avgWaitMin} min</span><span className="stat-label">Avg accept time</span></div>
-        <div className="stat-tile"><span className="stat-num">{data.cancelledByCustomer}</span><span className="stat-label">You cancelled</span></div>
-        <div className="stat-tile"><span className="stat-num">{data.cancelledByDriver}</span><span className="stat-label">Customer cancelled</span></div>
+        <div className="stat-tile"><span className="stat-num">{data.cancelledByCustomer}</span><span className="stat-label">Customer cancelled</span></div>
+        <div className="stat-tile"><span className="stat-num">{data.cancelledByDriver}</span><span className="stat-label">You cancelled</span></div>
       </div>
 
       <div className="card">

@@ -3,10 +3,23 @@
 // - Per phone per day: max MAX_PER_DAY (caps the real cost of OTP SMS messages).
 // - Verify: max MAX_VERIFY_PER_WINDOW attempts per phone per WINDOW_MS.
 
+const config = require('../config');
+
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 3;
 const MAX_PER_DAY = 10;
 const MAX_VERIFY_PER_WINDOW = 5;
+
+// Outside production the OTP is a fixed dev code delivered by a console log
+// (see services/sms.js), so there is no SMS cost and no real message to abuse.
+// The *request* caps exist purely for that production concern, and they are the
+// ones that break legitimate local/CI activity: the e2e suite signs the same
+// owner phone in from several specs inside one window. Relax them in dev/test
+// only. The verify cap is deliberately left alone so login brute-force
+// protection is identical in every environment.
+const isProd = config.nodeEnv === 'production';
+const OTP_MAX_PER_WINDOW = isProd ? MAX_PER_WINDOW : 1000;
+const OTP_MAX_PER_DAY = isProd ? MAX_PER_DAY : 10000;
 
 const buckets = new Map();
 const verifyBuckets = new Map();
@@ -28,12 +41,12 @@ function checkOtpLimit(phone) {
     buckets.set(phone, rec);
   }
 
-  if (rec.timestamps.length >= MAX_PER_DAY) {
+  if (rec.timestamps.length >= OTP_MAX_PER_DAY) {
     return { ok: false, code: 'DAILY_LIMIT', retryAfterSec: 60 };
   }
 
   rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
-  if (rec.timestamps.length >= MAX_PER_WINDOW) {
+  if (rec.timestamps.length >= OTP_MAX_PER_WINDOW) {
     const oldest = rec.timestamps[0];
     const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
     return { ok: false, code: 'TOO_FREQUENT', retryAfterSec };
@@ -61,4 +74,4 @@ function checkVerifyLimit(phone) {
   return { ok: true };
 }
 
-module.exports = { checkOtpLimit, checkVerifyLimit };
+module.exports = { checkOtpLimit, checkVerifyLimit, limits: { otpPerWindow: OTP_MAX_PER_WINDOW, otpPerDay: OTP_MAX_PER_DAY, verifyPerWindow: MAX_VERIFY_PER_WINDOW } };

@@ -4,7 +4,7 @@ import Skeleton from '../../components/Skeleton.jsx';
 import { useI18n } from '../../i18n.jsx';
 
 export default function History({ onBack, onRebook }) {
-  const { t } = useI18n();
+  const { t, statusLabel } = useI18n();
   const [trips, setTrips] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState(null);
@@ -41,7 +41,7 @@ export default function History({ onBack, onRebook }) {
               {tr.destination.note && <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{tr.destination.note}</span></div>}
             </div>
             <div className="history-meta">
-              <span className={`badge ${tr.status}`}>{tr.status}</span>
+              <span className={`badge ${tr.status}`}>{statusLabel(tr.status)}</span>
               <span className="subtitle">{tr.distanceKm ?? '-'} km</span>
               <span className="subtitle">{formatRand(tr.finalFare ?? tr.fareEstimate)}</span>
               {tr.rating != null && <span className="stars">★ {tr.rating}</span>}

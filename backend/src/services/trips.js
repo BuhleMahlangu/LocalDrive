@@ -16,29 +16,113 @@ function validatePromo(code) {
 }
 
 // Resolves a route to distance (km) and duration (min).
-// Uses Google Directions API if a key is configured, else a straight-line estimate.
+// Uses Google Directions API when a key is configured, otherwise OSRM (free, no
+// key). Both return an encoded precision-5 polyline, which is what the frontend
+// `decodePolyline` expects, so routes follow real roads either way. A
+// haversine estimate is the last resort if every provider fails.
+//
+// A route lookup happens on every estimate request, every driver route refresh
+// and every new booking, all for pairs of points a few hundred metres apart in
+// the same small town. So results are memoised on a coarse grid (~11 m) and held
+// briefly: it removes almost all duplicate billable calls, and a rounded key
+// means a customer nudging a pin a few centimetres reuses the answer rather than
+// asking the provider again.
+const ROUTE_CACHE_TTL_MS = 10 * 60 * 1000;
+const ROUTE_CACHE_MAX = 500;
+const PROVIDER_TIMEOUT_MS = 5000;
+const routeCache = new Map();
+
+function routeCacheKey(a, b) {
+  // 5 decimal places ≈ 1.1 m, which is finer than any pin the UI can place.
+  const round = (n) => Number(n).toFixed(5);
+  return [round(a.lat), round(a.lng), round(b.lat), round(b.lng)].join(',');
+}
+
+function routeCacheGet(key) {
+  const hit = routeCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > ROUTE_CACHE_TTL_MS) {
+    routeCache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function routeCacheSet(key, value) {
+  if (routeCache.size >= ROUTE_CACHE_MAX) {
+    // Cheap eviction: drop the oldest entry rather than maintaining an LRU.
+    routeCache.delete(routeCache.keys().next().value);
+  }
+  routeCache.set(key, { at: Date.now(), value });
+}
+
+async function fetchGoogleRoute({ pickup, destination }) {
+  const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${pickup.lat},${pickup.lng}&destination=${destination.lat},${destination.lng}&mode=driving&key=${config.googleMapsApiKey}`;
+  // Without a timeout a hung connection blocks the estimate for as long as the
+  // browser is willing to wait, which on a rural connection can be a minute.
+  const resp = await fetch(url, { signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+  if (!resp.ok) throw new Error(`Directions HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (data.status !== 'OK') throw new Error(`Directions ${data.status}`);
+  const route = data.routes?.[0];
+  const leg = route?.legs?.[0];
+  if (!leg || !leg.distance || !leg.duration) throw new Error('Directions returned no usable leg');
+  return {
+    distanceKm: leg.distance.value / 1000,
+    durationMin: leg.duration.value / 60,
+    polyline: route.overview_polyline?.points || null,
+  };
+}
+
+// OSRM takes/returns `lng,lat` (GeoJSON order, not the lat-first form used
+// everywhere else in this codebase) and reports metres/seconds.
+async function fetchOsrmRoute({ pickup, destination }) {
+  const base = String(config.osrmBaseUrl).replace(/\/+$/, '');
+  const coord = (p) => `${p.lng},${p.lat}`;
+  const url = `${base}/route/v1/driving/${coord(pickup)};${coord(destination)}`
+    + '?overview=full&geometries=polyline';
+  const resp = await fetch(url, { signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS) });
+  if (!resp.ok) throw new Error(`OSRM HTTP ${resp.status}`);
+  const data = await resp.json();
+  if (data.code !== 'Ok') throw new Error(`OSRM ${data.code}`);
+  const route = data.routes?.[0];
+  if (!route || !route.distance || !route.duration) throw new Error('OSRM returned no usable route');
+  return {
+    distanceKm: route.distance / 1000,
+    durationMin: route.duration / 60,
+    polyline: route.geometry || null,
+  };
+}
+
 async function getRoute({ pickup, destination }) {
-  if (config.googleMapsApiKey) {
+  const key = routeCacheKey(pickup, destination);
+  const cached = routeCacheGet(key);
+  if (cached) return cached;
+
+  // Google first when it is paid for and configured; OSRM otherwise, and always
+  // as the safety net so a Google outage degrades to real roads rather than a
+  // straight line.
+  const providers = [['OSRM', fetchOsrmRoute]];
+  if (config.googleMapsApiKey) providers.unshift(['Google', fetchGoogleRoute]);
+
+  let result = null;
+  for (const [name, fetchRoute] of providers) {
     try {
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${pickup.lat},${pickup.lng}&destination=${destination.lat},${destination.lng}&mode=driving&key=${config.googleMapsApiKey}`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (data.routes && data.routes.length) {
-        const leg = data.routes[0].legs[0];
-        return {
-          distanceKm: leg.distance.value / 1000,
-          durationMin: leg.duration.value / 60,
-          polyline: data.routes[0].overview_polyline.points,
-        };
-      }
+      result = await fetchRoute({ pickup, destination });
+      break;
     } catch (e) {
-      console.warn('[route] Directions API error, falling back to estimate:', e.message);
+      console.warn(`[route] ${name} failed, falling back:`, e.message);
     }
   }
-  const distanceKm = estimatedRoadKm(
-    pickup.lat, pickup.lng, destination.lat, destination.lng,
-  );
-  return { distanceKm, durationMin: Math.max(2, distanceKm * 2 + 5), polyline: null };
+  if (!result) {
+    const distanceKm = estimatedRoadKm(
+      pickup.lat, pickup.lng, destination.lat, destination.lng,
+    );
+    result = { distanceKm, durationMin: Math.max(2, distanceKm * 2 + 5), polyline: null };
+  }
+
+  routeCacheSet(key, result);
+  return result;
 }
 
 async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null }) {
@@ -130,6 +214,13 @@ function activateScheduledTrip(tripId, driverId) {
     if (promo) repo.usePromo(promo.id);
   }
   return trip;
+}
+
+// The scheduler releasing a due pre-booked ride into the live request queue.
+// Unlike activateScheduledTrip, this names no driver — the trip goes out to
+// every online approved driver, exactly like an immediate booking.
+function releaseScheduledTrip(tripId) {
+  return repo.releaseScheduledTripToQueue(tripId);
 }
 
 // Check geofencing before dispatch: at least one approved driver must be online
@@ -393,7 +484,8 @@ module.exports = {
   completeTrip,
   cancelTrip,
   rateTrip,
-  activateScheduledTrip,
+activateScheduledTrip,
+  releaseScheduledTrip,
   platformFeePercent,
   validatePromo,
   publicDriver,

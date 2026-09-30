@@ -9,8 +9,10 @@ import ThemeToggle from '../components/ThemeToggle.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
 import { isAdminUser } from '../api.js';
+import { LangToggle, useI18n } from '../i18n.jsx';
 
 export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
+  const { t } = useI18n();
   const [view, setView] = useState('dashboard');
 
   // The Dashboard runs a live geolocation loop and socket while mounted, so it is
@@ -23,13 +25,14 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   return (
     <div className="app driver-app">
       <header className="dash-header">
-        <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /><em>Driver</em></span>
+        <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /><em>{t('common.driver')}</em></span>
         <span className="user-chip">{user.name || user.phone}</span>
-        <button className="chip-btn" onClick={() => onSwitchRole('customer')} title="Preview the customer app">
-          <Icon name="swap" size={14} /> Customer mode
+        <button className="chip-btn" onClick={() => onSwitchRole('customer')} title={t('common.customerMode')}>
+          <Icon name="swap" size={14} /> {t('common.customerMode')}
         </button>
         <ThemeToggle />
-        <button className="link-btn" onClick={onLogout}>Log out</button>
+        <LangToggle />
+        <button className="link-btn" onClick={onLogout}>{t('common.logout')}</button>
       </header>
 
       {showDashboard && <ErrorBoundary resetKey="dashboard"><Dashboard user={user} onUserUpdate={setUser} /></ErrorBoundary>}
@@ -56,24 +59,24 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
 
       <nav className="bottom-nav">
         <button className={view === 'dashboard' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('dashboard')}>
-          <Icon name="home" className="nav-icon" /> Home
+          <Icon name="home" className="nav-icon" /> {t('nav.home')}
         </button>
         <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')}>
-          <Icon name="trips" className="nav-icon" /> Trips
+          <Icon name="trips" className="nav-icon" /> {t('nav.trips')}
         </button>
         <button className={view === 'analytics' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('analytics')}>
-          <Icon name="chart" className="nav-icon" /> Insights
+          <Icon name="chart" className="nav-icon" /> {t('nav.insights')}
         </button>
         <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')}>
-          <Icon name="coins" className="nav-icon" /> Revenue
+          <Icon name="coins" className="nav-icon" /> {t('nav.payouts')}
         </button>
         {hasAdmin && (
           <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')}>
-            <Icon name="gear" className="nav-icon" /> Admin
+            <Icon name="gear" className="nav-icon" /> {t('nav.admin')}
           </button>
         )}
         <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')}>
-          <Icon name="profile" className="nav-icon" /> Profile
+          <Icon name="profile" className="nav-icon" /> {t('nav.profile')}
         </button>
       </nav>
     </div>

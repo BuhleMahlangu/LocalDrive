@@ -76,7 +76,16 @@ function DriversTab() {
   if (!drivers) return <p className="hint">Loading drivers…</p>;
 
   const order = { pending: 0, rejected: 1, approved: 2, suspended: 3 };
-  const sorted = [...drivers].sort((a, b) => (order[a.user.driverStatus] ?? 9) - (order[b.user.driverStatus] ?? 9) || a.user.createdAt.localeCompare(b.user.createdAt));
+  // A driver row can arrive without `user`/`createdAt` (partial record, or a
+  // driver deleted mid-request). Sorting must not throw and blank the screen.
+  const createdAt = (d) => d?.user?.createdAt || '';
+  const sorted = [...drivers]
+    .filter((d) => d && d.user)
+    .sort(
+      (a, b) =>
+        (order[a.user.driverStatus] ?? 9) - (order[b.user.driverStatus] ?? 9) ||
+        createdAt(a).localeCompare(createdAt(b))
+    );
   const pending = sorted.filter((d) => d.user.driverStatus === 'pending');
 
   const statusLabel = (s) => (
@@ -594,6 +603,8 @@ function RecordsTab() {
 // The full audit record for one trip: route on a map, every event timestamp,
 // payment details, and the message thread (customer on the left, driver right).
 function TripAudit({ trip }) {
+  // A trip record may omit `messages` entirely, so normalise before rendering.
+  const messages = Array.isArray(trip.messages) ? trip.messages : [];
   const markers = [];
   const route = [];
   if (trip.pickup?.lat != null && trip.pickup?.lng != null) {
@@ -683,10 +694,10 @@ function TripAudit({ trip }) {
       )}
 
       <div className="chat-wrap" style={{ marginTop: '12px' }}>
-        <div className="chat-header"><span>Message thread ({trip.messages.length})</span></div>
+        <div className="chat-header"><span>Message thread ({messages.length})</span></div>
         <div className="chat-list" style={{ maxHeight: 260 }}>
-          {trip.messages.length === 0 && <p className="hint">No messages exchanged during this trip.</p>}
-          {trip.messages.map((m) => (
+          {messages.length === 0 && <p className="hint">No messages exchanged during this trip.</p>}
+          {messages.map((m) => (
             <div key={m.id} className={`chat-bubble ${m.sender?.role === 'driver' ? 'mine' : 'theirs'}`}>
               <span className="chat-bubble-body">{m.body}</span>
               <span className="chat-bubble-time">

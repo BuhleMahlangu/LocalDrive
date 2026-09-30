@@ -105,6 +105,68 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   await driverCtx.close();
 });
 
+// The preset green dots are not pickup-only. With no pickup chosen yet the first
+// dot must set the pickup; once a pickup exists the same dots become valid
+// drop-offs.
+test('a preset spot can be the drop-off, not just the pickup', async ({ browser }) => {
+  const ctx = await browser.newContext();
+  await ctx.addInitScript(() => {
+    localStorage.setItem('drivelocal_onboarded', '1');
+    localStorage.setItem('drivelocal_theme', 'light');
+  });
+  const page = await ctx.newPage();
+  await login(page, { role: 'customer', phone: '+27123456801', name: 'Lerato' });
+
+  await expect(page.locator('.topbar')).toBeVisible();
+  await page.locator('.book-hero .btn.primary.big').click();
+  await expect(page.locator('.leaflet-container')).toBeVisible();
+
+  const spotNames = await page.evaluate(async () => {
+    const r = await fetch('/api/pickup-spots');
+    const j = await r.json();
+    return j.spots.map((s) => s.name).filter(Boolean);
+  });
+  expect(spotNames.length).toBeGreaterThanOrEqual(2);
+
+  const spots = page.locator('.leaflet-marker-icon.spot-icon');
+  await expect(spots.first()).toBeVisible();
+  expect(await spots.count()).toBeGreaterThanOrEqual(2);
+
+  // Same divIcon hit-target workaround as the smoke test above. The map sits
+  // below the fold, so each marker has to be scrolled into view before its box
+  // is measured, and re-measured for every click (scrolling moves the rest).
+  const clickSpot = async (i) => {
+    const marker = spots.nth(i);
+    await expect(marker).toBeVisible();
+    await marker.scrollIntoViewIfNeeded();
+    const b = await marker.boundingBox();
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+  };
+
+  // Address inputs only. The pickup input is wrapped in `.field-row` (it has the
+  // 🎯 button beside it), the destination is a direct child, and both cards also
+  // render a nested `.gps-link-row` pin readout that must not be matched.
+  const addressInputs = page.locator(
+    'label.field > div.field-row > input[readonly], label.field > input[readonly]',
+  );
+  const pickupField = addressInputs.first();
+  const destField = addressInputs.nth(1);
+
+  // Nothing chosen yet, so the first green dot is the pickup.
+  await clickSpot(0);
+  await expect(pickupField).not.toHaveValue('');
+  expect(spotNames).toContain(await pickupField.inputValue());
+  await expect(destField).toHaveValue('');
+
+  // The destination pin is the active one by default, so the next green dot
+  // becomes the drop-off — and it is named like a spot, not a blank raw pin.
+  await clickSpot(1);
+  await expect(destField).not.toHaveValue('');
+  expect(spotNames).toContain(await destField.inputValue());
+
+  await ctx.close();
+});
+
 // Quick logout sanity: the link-btn in the customer topbar clears the session.
 test('customer can log out back to the landing page', async ({ browser }) => {
   const ctx = await browser.newContext();

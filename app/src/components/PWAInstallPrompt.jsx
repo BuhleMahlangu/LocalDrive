@@ -1,13 +1,27 @@
 import React, { useEffect, useState } from 'react';
 
+const KEY = 'drivelocal_install_dismissed';
+const NAG_DAYS = 7;
+
+function recentlyDismissed() {
+  const raw = localStorage.getItem(KEY);
+  if (!raw) return false;
+  // Legacy/boolean value: treated as a permanent opt-out, since a stored
+  // '1' carries no date to age out.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return true;
+  const then = Date.parse(`${raw}T00:00:00`);
+  if (Number.isNaN(then)) return false;
+  return Date.now() - then < NAG_DAYS * 24 * 60 * 60 * 1000;
+}
+
 // Gently offers to install DriveLocal as an app (PWA). Shows only when the
-// browser fires beforeinstallprompt AND we haven't dismissed it yet this week.
+// browser fires beforeinstallprompt AND the user has not dismissed it in the
+// last week.
 export default function PWAInstallPrompt() {
   const [deferred, setDeferred] = useState(null);
 
   useEffect(() => {
-    const KEY = 'drivelocal_install_dismissed';
-    if (localStorage.getItem(KEY)) return;
+    if (recentlyDismissed()) return undefined;
 
     const handler = (e) => {
       e.preventDefault();
@@ -15,7 +29,6 @@ export default function PWAInstallPrompt() {
     };
     window.addEventListener('beforeinstallprompt', handler);
 
-    // Auto-hide prompt on iOS (no beforeinstallprompt) — nothing to do there.
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
@@ -25,15 +38,15 @@ export default function PWAInstallPrompt() {
     if (!deferred) return;
     deferred.prompt();
     const { outcome } = await deferred.userChoice;
-    if (outcome === 'accepted') setDeferred(null);
-    localStorage.setItem('drivelocal_install_dismissed', '1');
+    // Accepted means the app is installed — never prompt again. Declining is a
+    // softer signal, so it ages out after a week like a dismissal.
+    if (outcome === 'accepted') localStorage.setItem(KEY, '1');
+    else dismiss();
     setDeferred(null);
   }
 
   function dismiss() {
-    // Don't nag for a while after the user dismisses.
-    const d = new Date().toISOString().slice(0, 10);
-    localStorage.setItem('drivelocal_install_dismissed', d);
+    localStorage.setItem(KEY, new Date().toISOString().slice(0, 10));
     setDeferred(null);
   }
 

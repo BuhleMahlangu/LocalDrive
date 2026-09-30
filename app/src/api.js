@@ -46,7 +46,10 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY);
 }
 
-export async function api(path, { method = 'GET', body, token } = {}) {
+// `signal` lets a caller abandon a request it no longer cares about — the
+// booking screen re-prices on every pin nudge and must not let a slow earlier
+// response overwrite a newer one.
+export async function api(path, { method = 'GET', body, token, signal } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   const t = token ?? getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
@@ -54,6 +57,7 @@ export async function api(path, { method = 'GET', body, token } = {}) {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   let json = {};
   try {

@@ -4,6 +4,8 @@ import Chat from '../../components/Chat.jsx';
 import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 import { getEmergencyContact, setEmergencyContact, sendSos } from '../../lib/emergency.js';
+import { etaMinutes } from '../../lib/geo.js';
+import decodePolyline from '../../lib/polyline.js';
 import { useI18n } from '../../i18n.jsx';
 
 const FEEDBACK_TAGS = ['Friendly', 'Punctual', 'Clean car', 'Safe driving', 'Great music', 'Smooth ride', 'Helpful'];
@@ -16,22 +18,6 @@ const CANCEL_REASONS = [
   'Driver took too long',
   'Other',
 ];
-
-function haversineKm(lat1, lng1, lat2, lng2) {
-  const R = 6371;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-// Straight-line time estimate to the pickup, matching the fare model
-// (2 min/km + 5 min) so the ETA tracks the driver live as they approach.
-function etaMin(loc, pickup) {
-  if (!loc || !pickup) return null;
-  return Math.max(1, Math.round(haversineKm(loc.lat, loc.lng, pickup.lat, pickup.lng) * 2 + 5));
-} 
 
 export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const { t } = useI18n();
@@ -51,6 +37,10 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
   const [socket, setSocket] = useState(null);
   const chimePlayedRef = useRef(false);
   const arrivedChimeRef = useRef(false);
+  const tripIdRef = useRef(initial?.id ?? null);
+  // Whether the map is currently chasing the driver. Drives the "recenter"
+  // affordance and a short hint so the customer knows panning turns it off.
+  const [following, setFollowing] = useState(true);
   // SOS modal state.
   const [sosOpen, setSosOpen] = useState(false);
   const [sosContact, setSosContact] = useState(() => getEmergencyContact());
@@ -75,6 +65,11 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     const socket = connectSocket();
     socketRef.current = socket;
     setSocket(socket);
+    // The socket effect runs once, so it must read the current trip id through
+    // a ref. Reading `trip` straight from the closure captured `initial`, which
+    // is null whenever the screen was opened before /trips/active resolved —
+    // every trip:location frame was then silently discarded and the customer
+    // watched a frozen map for the whole trip.
     socket.on('trip:updated', (data) => data?.trip && setTrip(data.trip));
     socket.on('trip:accepted', (data) => {
       if (data?.trip) {
@@ -95,15 +90,17 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       }
     });
     socket.on('trip:location', (data) => {
-      if (data?.tripId === trip?.id) setDriverLoc({ lat: data.lat, lng: data.lng });
+      if (!data || (tripIdRef.current != null && data.tripId !== tripIdRef.current)) return;
+      setDriverLoc({ lat: data.lat, lng: data.lng, heading: data.heading ?? null });
     });
     socket.on('payment:updated', (data) => {
-      if (data?.tripId === trip?.id && data?.payment) setPayment(data.payment);
+      if (data?.tripId === tripIdRef.current && data?.payment) setPayment(data.payment);
       if (data?.trip) setTrip(data.trip);
     });
     return () => socket.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => { tripIdRef.current = trip?.id ?? null; }, [trip?.id]);
 
   // Payment status for the fare card — only relevant once the trip is complete.
   useEffect(() => {
@@ -119,11 +116,15 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
     return () => clearTimeout(t);
   }, [toast]);
 
+  // Prefer the road-following polyline the backend computed at booking time.
+  // Fall back to the straight line only when there is no polyline to decode.
   useEffect(() => {
-    if (trip?.pickup && trip?.destination) {
-      setRoute([[trip.pickup.lat, trip.pickup.lng], [trip.destination.lat, trip.destination.lng]]);
-    }
-  }, [trip?.pickup, trip?.destination]);
+    if (!trip?.pickup || !trip?.destination) return;
+    const decoded = decodePolyline(trip.routePolyline);
+    setRoute(decoded && decoded.length >= 2
+      ? decoded
+      : [[trip.pickup.lat, trip.pickup.lng], [trip.destination.lat, trip.destination.lng]]);
+  }, [trip?.pickup, trip?.destination, trip?.routePolyline]);
 
   function confirmCancel() {
     if (!trip || !['requested', 'accepted'].includes(trip.status)) return;
@@ -235,11 +236,17 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
 
   const markers = useMemo(() => {
     const m = [];
-    if (driverLoc) m.push({ lat: driverLoc.lat, lng: driverLoc.lng, type: 'driver' });
+    if (driverLoc) {
+      m.push({ lat: driverLoc.lat, lng: driverLoc.lng, type: 'driver', heading: driverLoc.heading });
+    }
     if (trip?.pickup) m.push({ lat: trip.pickup.lat, lng: trip.pickup.lng, type: 'home' });
     if (trip?.destination) m.push({ lat: trip.destination.lat, lng: trip.destination.lng, type: 'dest' });
     return m;
   }, [driverLoc, trip]);
+
+  // Once the trip is over there is nobody left to follow, so stop handing the
+  // map a follow target and let it settle on the route.
+  const followDriver = driverLoc && ['accepted', 'ongoing'].includes(trip?.status) ? 'driver' : null;
 
   if (!trip) {
     return (
@@ -266,7 +273,17 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       </div>
 
       <div className="map-wrap tall">
-        <Map center={driverLoc || (trip.pickup && [trip.pickup.lat, trip.pickup.lng])} markers={markers} route={route} />
+        <Map
+          center={driverLoc || (trip.pickup && [trip.pickup.lat, trip.pickup.lng])}
+          markers={markers}
+          route={route}
+          follow={followDriver}
+          onFollowChange={setFollowing}
+          locateControl
+        />
+        {followDriver && !following && (
+          <div className="map-status">Moved the map — tap 🎯 to follow the driver again</div>
+        )}
       </div>
 
       <div className="card trip-card">
@@ -310,7 +327,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
               🚗 {trip.arrivedAt
                 ? t('trip.driverArrived')
                 : driverLoc
-                  ? t('trip.arrivingIn', { min: etaMin(driverLoc, trip.pickup) })
+                  ? t('trip.arrivingIn', { min: etaMinutes(driverLoc, trip.pickup) })
                   : t('trip.tracking')}
             </span>
           </div>

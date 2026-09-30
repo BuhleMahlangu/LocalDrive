@@ -43,6 +43,11 @@ const config = {
   dbDriver: process.env.DB_DRIVER || 'sqlite',
   databaseUrl: process.env.DATABASE_URL,
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+  // Public OSRM demo server. Used whenever no GOOGLE_MAPS_API_KEY is configured
+  // so routes follow real roads instead of a straight line. Point this at your
+  // own OSRM instance (self-hosted or paid) for production traffic — the demo
+  // server has no uptime or rate-limit guarantee.
+  osrmBaseUrl: process.env.OSRM_BASE_URL || 'https://router.project-osrm.org',
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };

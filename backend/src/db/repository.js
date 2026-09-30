@@ -509,6 +509,17 @@ module.exports = {
     return result.changes === 1 ? this.getTripById(tripId) : null;
   },
 
+  // The scheduler releasing a pre-booked ride into the live request queue once
+  // its time arrives, so whichever approved driver is online then can claim it.
+  // Deliberately does NOT set a driver_id: unlike activateScheduledTripClaim,
+  // nobody is named here. Promo usage is charged when a driver activates.
+  releaseScheduledTripToQueue(tripId) {
+    const result = db.prepare(
+      "UPDATE trips SET status = 'requested' WHERE id = ? AND status = 'scheduled'",
+    ).run(tripId);
+    return result.changes === 1 ? this.getTripById(tripId) : null;
+  },
+
   // ---------- Admin safety / audit search ----------
   // Every trip is searchable by customer or driver name/phone so the platform
   // owner can reconstruct "who was with whom, when, and where" for an incident.
@@ -817,7 +828,10 @@ module.exports = {
   },
 
   // ---------- Pickup spots ----------
-  listPickupSpots(limit = 50) {
+  // New spots are appended with sort = MAX(sort) + 1, so they land last and a
+  // tight limit would silently drop exactly the spots an admin just added. The
+  // cap is therefore generous and matches what /api/admin/spots requests.
+  listPickupSpots(limit = 500) {
     return db.prepare(
       'SELECT * FROM pickup_spots WHERE active = 1 ORDER BY sort ASC, name ASC LIMIT ?',
     ).all(limit).map(mapSpot);

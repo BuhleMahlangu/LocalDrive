@@ -9,6 +9,21 @@ import { sendSos } from '../../lib/emergency.js';
 
 const AREA_CENTER = [-26.2155, 29.2916];
 
+// How often the driver actually publishes a fix, and how far they must have
+// moved for it to be worth sending. A moving phone reports GPS at 1 Hz or
+// better; three seconds is as fast as a human can follow a car on a map.
+const LOCATION_PUBLISH_MS = 3000;
+const LOCATION_MIN_MOVE_M = 5;
+
+function gpsErrorMessage(err) {
+  if (err?.code === 1) {
+    return 'Location is blocked. Allow Location for this site in your browser settings, then go offline and online again.';
+  }
+  if (err?.code === 2) return 'No GPS signal — customers will not see you moving. Try again in the open.';
+  if (err?.code === 3) return 'GPS is taking too long to respond. Customers may not see you moving.';
+  return 'Location is unavailable — customers will not see you moving.';
+}
+
 export default function Dashboard({ user, onUserUpdate }) {
   const [online, setOnline] = useState(!!user.isOnline);
   const [pending, setPending] = useState(null);
@@ -35,12 +50,22 @@ export default function Dashboard({ user, onUserUpdate }) {
   const driverLocRef = useRef(null);
   const activeRef = useRef(null);
   const fetchTimer = useRef(null);
+  // Mirrors `online` for socket callbacks registered once on mount. Reading
+  // state directly inside `connect` would capture the first render's value, so
+  // a driver who went online later would never re-publish after a reconnect.
+  const onlineRef = useRef(online);
+  // Last fix actually published to the server, for rate-limiting the stream.
+  const lastSentRef = useRef(null);
+  // Surfaced in the UI: a driver who is online but has no GPS is invisible to
+  // customers and has no idea why.
+  const [gpsError, setGpsError] = useState('');
   // Track GPS positions during an ongoing trip for actual distance calculation.
   const tripLocs = useRef([]);
   const tripStart = useRef(null);
 
   useEffect(() => { driverLocRef.current = driverLoc; }, [driverLoc]);
   useEffect(() => { activeRef.current = active; }, [active]);
+  useEffect(() => { onlineRef.current = online; }, [online]);
 
   const publishLocation = useCallback((socket) => {
     if (!navigator.geolocation) return;
@@ -51,16 +76,38 @@ export default function Dashboard({ user, onUserUpdate }) {
     // keeps updating even on a desktop whose location drifts.
     watchRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        const payload = { lat: latitude, lng: longitude, accuracy };
+        const { latitude, longitude, accuracy, heading } = pos.coords;
+        // watchPosition can fire far faster than the socket needs — a moving
+        // phone reports 1 Hz or better, and every fix was going straight to the
+        // server and out to the customer. Sample at 3 s instead (which is also
+        // what the server comment and the docstrings always claimed), and skip
+        // sub-metre wobble entirely: it moves nothing on the map but it does
+        // spend the driver's battery and the customer's data.
+        const last = lastSentRef.current;
+        const now = Date.now();
+        if (last
+          && now - last.t < LOCATION_PUBLISH_MS
+          && Math.hypot(latitude - last.lat, longitude - last.lng) < LOCATION_MIN_MOVE_M) {
+          return;
+        }
+        lastSentRef.current = { lat: latitude, lng: longitude, t: now };
+        // `heading` is null while the phone is stationary, so the customer's
+        // arrow simply stops pointing at a heading it doesn't have.
+        const payload = { lat: latitude, lng: longitude, accuracy, heading: heading ?? null };
         if (socket) socket.emit('driver:location', payload);
-        setDriverLoc({ lat: latitude, lng: longitude });
+        setDriverLoc({ lat: latitude, lng: longitude, heading: heading ?? null });
+        setGpsError('');
         // Record GPS fixes during an ongoing trip for actual distance tracking.
         if (activeRef.current?.status === 'ongoing') {
           tripLocs.current.push({ lat: latitude, lng: longitude, t: Date.now() });
         }
       },
-      () => {},
+      (err) => {
+        // A revoked permission here is otherwise indistinguishable from a parked
+        // car: the driver stays "online" and simply never receives bookings
+        // they can actually navigate to. Say so instead of failing silently.
+        setGpsError(gpsErrorMessage(err));
+      },
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 },
     );
   }, []);
@@ -70,6 +117,7 @@ export default function Dashboard({ user, onUserUpdate }) {
       navigator.geolocation.clearWatch(watchRef.current);
       watchRef.current = null;
     }
+    lastSentRef.current = null;
   }, []);
 
   const surfaceRequest = useCallback((t) => {
@@ -116,7 +164,7 @@ export default function Dashboard({ user, onUserUpdate }) {
     socketRef.current = socket;
     setSocket(socket);
     socket.on('connect', () => {
-      if (!online) return;
+      if (!onlineRef.current) return;
       // Re-emit the last known fix so the server records it on the new socket;
       // the watchPosition stream keeps feeding fresh ones afterwards.
       const last = driverLocRef.current;
@@ -370,7 +418,7 @@ export default function Dashboard({ user, onUserUpdate }) {
 
   const mapMarkers = useMemo(() => {
     const m = [];
-    if (driverLoc) m.push({ lat: driverLoc.lat, lng: driverLoc.lng, type: 'driver' });
+    if (driverLoc) m.push({ lat: driverLoc.lat, lng: driverLoc.lng, type: 'driver', heading: driverLoc.heading });
     spots.forEach((s) => m.push({ lat: s.lat, lng: s.lng, type: 'spot', name: s.name }));
     if (mapTrip?.pickup) m.push({ lat: mapTrip.pickup.lat, lng: mapTrip.pickup.lng, type: 'home' });
     if (mapTrip?.destination) m.push({ lat: mapTrip.destination.lat, lng: mapTrip.destination.lng, type: 'dest' });
@@ -496,12 +544,21 @@ export default function Dashboard({ user, onUserUpdate }) {
           markers={mapMarkers}
           routes={mapRoutes}
           autofit={!!(mapTrip?.pickup && mapTrip?.destination)}
+          follow={mapTrip && ['accepted', 'ongoing'].includes(mapTrip.status) ? 'driver' : null}
+          locateControl
+          onLocate={(p) => setDriverLoc((prev) => ({ ...prev, ...p }))}
         />
         <div className="map-status">{online ? '● Live' : '○ Offline'}</div>
         {spots.length > 0 && (
           <div className="map-legend"><span className="legend-dot" /> Pickup spots</div>
         )}
       </div>
+
+      {online && gpsError && (
+        <div className="gps-warning" role="alert">
+          <strong>📍 {gpsError}</strong>
+        </div>
+      )}
 
       {!online && (
         <div className="card hint-card">

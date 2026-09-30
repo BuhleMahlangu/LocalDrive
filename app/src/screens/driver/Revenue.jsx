@@ -17,17 +17,23 @@ export default function Revenue() {
   const [saving, setSaving] = useState(false);
   const [resolveId, setResolveId] = useState(null);
 
-  const load = () => {
-    api('/driver/promos').then((r) => setPromos(Array.isArray(r.promos) ? r.promos : [])).catch(() => {});
-    api('/driver/disputes')
-      .then((r) => {
-        const list = Array.isArray(r.disputes) ? r.disputes : [];
-        setOpenDisputes(list);
-      })
-      .catch(() => {});
-  };
+  const load = () =>
+    Promise.allSettled([
+      api('/driver/promos').then((r) => setPromos(Array.isArray(r.promos) ? r.promos : [])),
+      api('/driver/disputes')
+        .then((r) => setOpenDisputes(Array.isArray(r.disputes) ? r.disputes : []))
+        .catch(() => {}),
+    ]);
 
-  useEffect(() => { load(); setLoading(false); }, []);
+  useEffect(() => {
+    // The empty state is gated on `loading`, so it must stay true until both
+    // requests settle — otherwise "No promos or disputes yet." flashes first.
+    let live = true;
+    load().finally(() => {
+      if (live) setLoading(false);
+    });
+    return () => { live = false; };
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;

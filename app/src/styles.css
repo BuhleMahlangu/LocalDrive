@@ -21,8 +21,11 @@
 
   /* Brand (customer = green, driver = violet) */
   --primary: #16a34a;
-  --primary-dark: #14803c;
+  --primary-dark: #116a31;
   --primary-soft: #e3f6eb;
+  /* Text drawn on --primary-soft. Kept separate from --primary-dark so the
+     on-soft pairs can be tuned to 4.5:1 without darkening solid fills. */
+  --primary-ink: #116a31;
   --accent: #f97316;
   --driver: #7c3aed;
   --driver-dark: #5b21b6;
@@ -32,6 +35,13 @@
   --star: #f59e0b;
   --danger: #e5484d;
   --danger-soft: #fdeeee;
+  /* Text on --danger-soft, and text on a solid --danger fill. #e5484d only
+     reaches ~3.5:1 on white, so these two darker steps carry the text. */
+  --danger-ink: #a51d1c;
+  --on-danger: #ffffff;
+  /* Filled danger surfaces. #e5484d is fine as a border/accent but only
+     reaches 3.9:1 under white text, so solid buttons use this deeper step. */
+  --danger-solid: #c2262b;
 
   /* Lines & shape */
   --border: #e5eaf3;
@@ -47,6 +57,17 @@
 
   --gradient: linear-gradient(135deg, #16a34a 0%, #0ea5e9 100%);
   --gradient-driver: linear-gradient(135deg, #7c3aed 0%, #2563eb 100%);
+  /* Darkened variants for surfaces that carry white text. The vivid brand
+     gradient only reaches ~3.3:1 against white, so anything with a label on
+     top uses these instead; decorative fills keep --gradient. */
+  --gradient-ink: linear-gradient(135deg, #0f7a35 0%, #0b6e9b 100%);
+  --gradient-driver-ink: linear-gradient(135deg, #5b21b6 0%, #1d4ed8 100%);
+
+  /* Chips sitting on a coloured bar darken it rather than tinting it white,
+     so their white labels keep a passing ratio on both bar gradients. */
+  --chip-fill: rgba(0, 0, 0, 0.26);
+  --chip-fill-hover: rgba(0, 0, 0, 0.36);
+  --chip-border: rgba(255, 255, 255, 0.34);
 
   /* Reusable surface tones */
   --surface-input: #ffffff;
@@ -72,6 +93,7 @@
   --primary: #2ecb6f;
   --primary-dark: #67e59a;
   --primary-soft: #123524;
+  --primary-ink: #7df0aa;
   --driver: #a78bfa;
   --driver-dark: #c4b5fd;
   --driver-soft: #2a2150;
@@ -79,6 +101,12 @@
   --info-soft: #1c2c4f;
   --danger: #f0747a;
   --danger-soft: #3c1a26;
+  --danger-ink: #fca5a5;
+  /* Dark-mode red is light enough that white text on it drops to 2.8:1, so the
+     solid-fill variant uses the dark surface colour as its foreground. */
+  --on-danger: #2a0b0e;
+  /* 4.94:1 with the dark --on-danger ink, where #d94a52 only reached 4.38. */
+  --danger-solid: #e0575f;
 
   --border: #26314a;
   --border-strong: #36435f;
@@ -90,6 +118,10 @@
   --surface-input: #0f1728;
   --surface-nav: rgba(15, 24, 40, 0.96);
   --surface-sunken: #101a2e;
+  --gradient-ink: linear-gradient(135deg, #0f7a35 0%, #0b5d8a 100%);
+  --chip-fill: rgba(0, 0, 0, 0.3);
+  --chip-fill-hover: rgba(0, 0, 0, 0.4);
+  --chip-border: rgba(255, 255, 255, 0.32);
 
   --focus-ring: 0 0 0 3px rgba(46, 203, 111, 0.25);
 }
@@ -130,8 +162,8 @@ h3 { font-size: 0.98rem; margin: 0; font-weight: 700; }
 }
 .subtitle { color: var(--muted); font-size: 0.9rem; margin: 4px 0; }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 8px 0; line-height: 1.5; }
-.error { color: var(--danger); font-size: 0.9rem; margin: 8px 0; font-weight: 650; }
-.success { color: var(--primary-dark); font-size: 0.9rem; margin: 8px 0; font-weight: 650; }
+.error { color: var(--danger-ink); font-size: 0.9rem; margin: 8px 0; font-weight: 650; }
+.success { color: var(--primary-ink); font-size: 0.9rem; margin: 8px 0; font-weight: 650; }
 .num { font-variant-numeric: tabular-nums; }
 
 /* ============================== Top bars ================================= */
@@ -139,7 +171,7 @@ h3 { font-size: 0.98rem; margin: 0; font-weight: 700; }
   position: sticky; top: 0;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 10px 16px; color: #fff; z-index: 1000;
-  background: var(--gradient);
+  background: var(--gradient-ink);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.16) inset, var(--shadow);
 }
 .brand {
@@ -160,35 +192,37 @@ h3 { font-size: 0.98rem; margin: 0; font-weight: 700; }
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
 }
 .brand-logomark em {
-  font-style: normal; font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em;
+  /* 0.72rem = 11.52px at the 16px root: the 0.68rem used here computed to
+     10.9px, just under the 11px legibility floor for this uppercase label. */
+  font-style: normal; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em;
   text-transform: uppercase; color: #fff; opacity: 0.9;
 }
 .btn svg { vertical-align: -3px; margin-right: 9px; }
 .user-chip {
-  margin-left: auto; font-size: 0.8rem; font-weight: 650; background: rgba(255, 255, 255, 0.16);
-  padding: 5px 12px; border-radius: 20px; color: #fff;
+  margin-left: auto; font-size: 0.8rem; font-weight: 650; background: var(--chip-fill);
+  padding: 7px 12px; border-radius: 20px; color: #fff; min-height: 36px; display: inline-flex; align-items: center;
   max-width: 30vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.topbar .link-btn { color: #fff; }
+.topbar .link-btn { color: #fff; min-height: 36px; }
 
 .dash-header {
   position: sticky; top: 0;
   display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
   padding: 12px 16px; color: #fff; border-radius: 0 0 22px 22px; z-index: 1000;
-  background: var(--gradient-driver);
+  background: var(--gradient-driver-ink);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.16) inset, var(--shadow-lg);
 }
 .dash-header .brand { color: #fff; }
 .dash-header .user-chip { margin-left: auto; }
-.dash-header .link-btn { color: #e9d5ff; }
+.dash-header .link-btn { color: #f0e6ff; min-height: 36px; }
 
 .chip-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--chip-fill); color: #fff; border: 1px solid var(--chip-border);
   border-radius: 20px; padding: 6px 13px; font-size: 0.76rem; cursor: pointer; white-space: nowrap;
-  font-weight: 650; transition: background 0.2s, transform 0.08s;
+  font-weight: 650; transition: background 0.2s, transform 0.08s; min-height: 36px;
 }
-.chip-btn:hover { background: rgba(255, 255, 255, 0.28); }
+.chip-btn:hover { background: var(--chip-fill-hover); }
 .chip-btn:active { transform: scale(0.97); }
 
 /* ============================ Cards & buttons ============================ */
@@ -208,11 +242,11 @@ h3 { font-size: 0.98rem; margin: 0; font-weight: 700; }
 .btn:active { transform: scale(0.975); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .btn:focus-visible { box-shadow: var(--focus-ring); }
-.btn.primary { background: var(--gradient); color: #fff; box-shadow: 0 6px 16px -4px rgba(22, 163, 74, 0.45); }
+.btn.primary { background: var(--gradient-ink); color: #fff; box-shadow: 0 6px 16px -4px rgba(22, 163, 74, 0.45); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.05); box-shadow: 0 9px 22px -6px rgba(22, 163, 74, 0.55); }
 .btn.driver { background: var(--gradient-driver); color: #fff; box-shadow: 0 6px 16px -4px rgba(124, 58, 237, 0.4); }
 .btn.driver:hover:not(:disabled) { filter: brightness(1.05); }
-.btn.danger { background: var(--danger); color: #fff; }
+.btn.danger { background: var(--danger-solid); color: var(--on-danger); }
 .btn.big { font-size: 1.15rem; padding: 17px; border-radius: 15px; }
 .btn.small { width: auto; padding: 9px 14px; font-size: 0.85rem; margin-top: 0; border-radius: 11px; }
 .btn-row { display: flex; gap: 10px; }
@@ -240,7 +274,7 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .field-row input { flex: 1; margin-top: 0; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .rate-preview {
-  background: var(--primary-soft); color: var(--primary-dark); padding: 13px; border-radius: var(--radius-sm);
+  background: var(--primary-soft); color: var(--primary-ink); padding: 13px; border-radius: var(--radius-sm);
   font-size: 0.9rem; font-weight: 700; margin: 10px 0; border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
@@ -267,18 +301,27 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
   font-size: 0.76rem; font-weight: 700; margin: 18px 0 6px; text-transform: uppercase; letter-spacing: 0.06em;
 }
 .landing-divider::before, .landing-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+/* Tagline sits on the aurora gradient, so it uses --ink-soft rather than
+   --muted: muted only reaches ~3.8:1 over the tinted corners. */
+.hero-tagline { color: var(--ink-soft); }
 .back-link {
-  display: inline-block; margin-top: 14px; font-size: 0.85rem; color: var(--primary-dark);
-  cursor: pointer; font-weight: 650; background: rgba(255, 255, 255, 0.7); padding: 6px 14px; border-radius: 20px;
-  transition: color 0.2s, background 0.2s;
+  display: inline-flex; align-items: center; justify-content: center; margin-top: 14px;
+  font-size: 0.85rem; color: var(--primary-ink);
+  cursor: pointer; font-weight: 650; background: rgba(255, 255, 255, 0.7);
+  border: none; font-family: inherit; padding: 8px 14px; border-radius: 20px;
+  min-height: 36px; transition: color 0.2s, background 0.2s;
 }
 .back-link:hover { color: var(--primary); background: rgba(255, 255, 255, 0.95); }
 .brand-hero h1 {
   font-size: 2.3rem; margin: 12px 0 6px; letter-spacing: -0.03em;
-  background: var(--gradient); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  /* Ink gradient, not the vivid brand one: clipped text inherits the lightest
+     stop, and the sky-blue end of --gradient is unreadable on a light page. */
+  background: var(--gradient-ink); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 [data-theme="dark"] .brand-hero h1 { background: linear-gradient(135deg, var(--primary), #7aa5fa); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
-.brand-hero p { color: var(--muted); margin: 0; }
+/* Tagline sits on the aurora gradient, so it uses --ink-soft rather than
+   --muted: muted only reaches ~3.8:1 over the tinted corners. */
+.brand-hero p { color: var(--ink-soft); margin: 0; }
 .brand-badge {
   width: 76px; height: 76px; margin: 0 auto; border-radius: 24px; color: #fff;
   display: flex; align-items: center; justify-content: center; font-size: 1.9rem; font-weight: 850;
@@ -333,11 +376,19 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .map-wrap.tall { height: 380px; }
 .map { width: 100%; height: 100%; }
 .map-overlay {
-  position: absolute; bottom: 14px; left: 14px; right: 14px; background: var(--ink);
+  position: absolute; bottom: 30px; left: 14px; right: 14px; background: var(--ink);
   color: #fff; border-radius: 14px; padding: 12px 16px; font-size: 0.85rem; text-align: center; pointer-events: none;
   box-shadow: var(--shadow-lg); border: 1px solid rgba(255, 255, 255, 0.1);
 }
 .map-status { position: absolute; top: 12px; left: 12px; background: rgba(15, 23, 42, 0.85); color: #fff; padding: 5px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; box-shadow: var(--shadow-sm); }
+/* Shown when the driver is online but their GPS has stopped working — they are
+   invisible to customers and this is the only thing that tells them why. */
+.gps-warning {
+  margin: 10px 0; padding: 11px 14px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--danger) 12%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  color: var(--text); font-size: 0.82rem; line-height: 1.35;
+}
 .map-status.edit-flag { top: 52px; background: var(--primary); }
 .map-legend { position: absolute; bottom: 10px; left: 12px; z-index: 800; display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 4px 10px; border-radius: 14px; font-size: 0.72rem; box-shadow: var(--shadow-sm); }
 .legend-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--primary); }
@@ -345,8 +396,7 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .spots-editor .spot-row { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px dashed var(--border); }
 .spots-editor .spot-name { flex: 1; min-width: 0; }
 .spots-editor .spot-coords { font-size: 0.7rem; color: var(--muted); white-space: nowrap; }
-.btn.danger { color: #fff; }
-.nearest-bar { display: block; width: 100%; margin: 10px 0 0; background: var(--primary-soft); color: var(--primary-dark); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); border-radius: var(--radius-sm); padding: 11px 14px; font: inherit; text-align: left; cursor: pointer; font-weight: 650; transition: filter 0.15s, transform 0.08s; }
+.nearest-bar { display: block; width: 100%; margin: 10px 0 0; background: var(--primary-soft); color: var(--primary-ink); border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent); border-radius: var(--radius-sm); padding: 11px 14px; font: inherit; text-align: left; cursor: pointer; font-weight: 650; transition: filter 0.15s, transform 0.08s; }
 .nearest-bar:hover { filter: brightness(0.985); }
 .nearest-bar:active { transform: scale(0.99); }
 .estimate-bar { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; border: 1px solid var(--border); }
@@ -356,7 +406,19 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .estimate-detail { color: var(--muted); font-size: 0.82rem; }
 
 /* ============================== Map icons ================================ */
-.car-dot { width: 26px; height: 26px; border-radius: 50%; background: var(--driver); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
+.car-icon { background: none; border: none; }
+.car-dot {
+  position: relative; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--driver); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+/* Rotates to the driver's heading so the customer can see which way the car is
+   facing. The dot around it stays still, which keeps it instantly recognisable
+   as "the car" even while the arrow swings. */
+.car-arrow { position: absolute; inset: 0; display: block; transition: transform 0.3s ease-out; }
+.car-arrow::before {
+  content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 6px solid #fff;
+}
 .home-dot { width: 22px; height: 22px; border-radius: 50%; background: var(--info); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
 .dest-dot2 { width: 22px; height: 22px; border-radius: 50%; background: var(--danger); border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); }
 .spot-icon { display: flex; align-items: center; justify-content: center; }
@@ -380,7 +442,7 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .star.on { color: var(--star); }
 .tips-row { display: flex; gap: 8px; margin-top: 6px; }
 .tip-chip { flex: 1; padding: 12px; border-radius: var(--radius-sm); border: 2px solid var(--border); background: var(--card); font-weight: 700; cursor: pointer; font-size: 0.85rem; transition: border-color 0.15s, background 0.15s; }
-.tip-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.tip-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
 .done-box, .rate-box { text-align: center; }
 .rate-box .btn { margin-top: 20px; }
 .fare-summary { display: flex; justify-content: space-around; gap: 12px; margin: 10px 0 4px; }
@@ -389,7 +451,7 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .fare-line { font-size: 1.25rem; font-weight: 750; color: var(--primary-dark); font-variant-numeric: tabular-nums; }
 .fare-line.strikethrough { text-decoration: line-through; color: var(--muted); font-weight: 600; }
 .pay-state { margin-top: 12px; padding: 8px 12px; border-radius: 10px; background: var(--bg-soft); font-weight: 650; font-size: 0.9rem; color: var(--muted); }
-.pay-state.ok { background: var(--primary-soft); color: var(--primary-dark); }
+.pay-state.ok { background: var(--primary-soft); color: var(--primary-ink); }
 .card-pay .link-btn { margin-top: 8px; }
 
 /* ========================= History & receipts ============================ */
@@ -397,12 +459,12 @@ label { display: block; margin: 12px 0; font-size: 0.88rem; color: var(--muted);
 .badge {
   padding: 4px 12px; border-radius: 20px; font-size: 0.74rem; font-weight: 750; text-transform: capitalize; letter-spacing: 0.02em;
 }
-.badge.completed { background: var(--primary-soft); color: var(--primary-dark); }
+.badge.completed { background: var(--primary-soft); color: var(--primary-ink); }
 .badge.requested { background: var(--info-soft); color: var(--info); }
 .badge.accepted { background: #fef3c7; color: #b45309; }
 .badge.ongoing { background: var(--driver-soft); color: var(--driver-dark); }
-.badge.cancelled { background: var(--danger-soft); color: var(--danger); }
-.badge.suspended { background: var(--danger-soft); color: var(--danger); }
+.badge.cancelled { background: var(--danger-soft); color: var(--danger-ink); }
+.badge.suspended { background: var(--danger-soft); color: var(--danger-ink); }
 .receipt { background: var(--bg-soft); border-radius: 14px; padding: 14px; margin-top: 14px; }
 .receipt-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 0.9rem; border-bottom: 1px dashed var(--border); }
 .receipt-row.total { font-weight: 850; border-bottom: none; color: var(--ink); }
@@ -434,7 +496,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 /* ============================== Live ETA chip ============================= */
 .eta-row { display: flex; justify-content: center; margin: 10px 0 2px; }
 .eta-chip {
-  background: var(--primary-soft); color: var(--primary-dark);
+  background: var(--primary-soft); color: var(--primary-ink);
   border: 1px solid var(--primary); border-radius: 999px;
   padding: 7px 16px; font-weight: 750; font-size: 0.95rem;
   display: inline-block; animation: pop 0.3s ease;
@@ -481,8 +543,8 @@ input:checked + .slider:before { transform: translateX(24px); }
 
 /* ============================= SOS button ============================== */
 .sos-btn {
-  background: var(--danger); color: #fff; border: none; border-radius: 999px;
-  padding: 6px 14px; font-weight: 800; font-size: 0.82rem; cursor: pointer;
+  background: var(--danger-solid); color: var(--on-danger); border: none; border-radius: 999px;
+  padding: 6px 14px; font-weight: 800; font-size: 0.82rem; cursor: pointer; min-height: 36px;
   box-shadow: 0 4px 12px -2px rgba(229, 72, 77, 0.5);
   flex-shrink: 0;
 }
@@ -507,7 +569,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .lang-toggle {
   background: var(--bg-soft); color: var(--text); border: 1px solid var(--border);
   border-radius: 999px; padding: 5px 12px; font-size: 0.8rem; font-weight: 700;
-  cursor: pointer; flex-shrink: 0;
+  cursor: pointer; flex-shrink: 0; min-height: 36px;
 }
 .lang-toggle:hover { border-color: var(--primary); color: var(--primary); }
 .lang-toggle.top-right { position: absolute; top: 12px; right: 12px; z-index: 5; }
@@ -570,11 +632,14 @@ input:checked + .slider:before { transform: translateX(24px); }
 }
 .nav-btn .nav-icon { display: grid; place-items: center; }
 .nav-btn:hover { color: var(--ink); background: var(--bg-soft); }
-.nav-btn.active { color: var(--primary-dark); background: var(--primary-soft); font-weight: 800; }
+.nav-btn.active { color: var(--primary-ink); background: var(--primary-soft); font-weight: 800; }
 
 /* ======================= Notifications toggle switch ===================== */
 .switch-row { display: flex; align-items: center; justify-content: space-between; width: 100%; font-size: 0.95rem; font-weight: 650; }
-.switch-row .switch { position: relative; width: 48px; height: 28px; border-radius: 14px; background: var(--border-strong); border: none; cursor: pointer; transition: background 0.2s; padding: 0; }
+.switch-row .switch { position: relative; width: 48px; height: 28px; border-radius: 14px; background: var(--border-strong); border: none; cursor: pointer; transition: background 0.2s; padding: 0; flex-shrink: 0; }
+/* The track stays 28px tall, but the tappable area is grown to 44px via an
+   invisible overlay so the control is comfortable to hit with a thumb. */
+.switch-row .switch::after { content: ""; position: absolute; inset: -8px -4px; }
 .switch-row .switch .knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s; }
 .switch-row .switch[aria-checked="true"] { background: var(--gradient); }
 .switch-row .switch[aria-checked="true"] .knob { transform: translateX(20px); }
@@ -583,7 +648,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .pay-choice { display: flex; gap: 8px; margin: 10px 0; }
 .pay-opt { flex: 1; padding: 11px; border: 2px solid var(--border); border-radius: var(--radius-sm); background: var(--card); color: var(--ink); cursor: pointer; font-weight: 700; transition: border-color 0.15s, background 0.15s; }
 .pay-opt:hover { border-color: var(--border-strong); }
-.pay-opt.active { border-color: var(--primary); color: var(--primary-dark); background: var(--primary-soft); }
+.pay-opt.active { border-color: var(--primary); color: var(--primary-ink); background: var(--primary-soft); }
 
 /* ============================= Card payment ============================== */
 .card-pay { margin: 12px 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-soft); }
@@ -600,7 +665,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 .landmark-chip:hover { border-color: var(--border-strong); }
-.landmark-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.landmark-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
 .place-note {
   width: 100%; margin-top: 8px; padding: 11px 12px; border: 1.5px dashed var(--border);
   border-radius: var(--radius-sm); font-size: 0.92rem; background: var(--surface-sunken); color: var(--ink);
@@ -615,7 +680,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .gps-link-row input { flex: 1; font-size: 0.78rem; padding: 8px; margin-top: 0; }
 .gps-link-row .btn.small { padding: 8px 10px; }
 .no-street-hint {
-  background: var(--primary-soft); color: var(--primary-dark); border-radius: var(--radius-sm);
+  background: var(--primary-soft); color: var(--primary-ink); border-radius: var(--radius-sm);
   padding: 12px 14px; font-size: 0.85rem; margin: 12px 0; line-height: 1.5;
   border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent);
 }
@@ -632,7 +697,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .pin-mode-btn.on.pickup { border-color: var(--info); color: var(--info); background: var(--info-soft); box-shadow: var(--shadow-sm); }
-.pin-mode-btn.on.dest { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); box-shadow: var(--shadow-sm); }
+.pin-mode-btn.on.dest { border-color: var(--danger); color: var(--danger-ink); background: var(--danger-soft); box-shadow: var(--shadow-sm); }
 
 /* ============================== Motion =================================== */
 @keyframes pop { 0% { transform: scale(0.92); opacity: 0; } 60% { transform: scale(1.03); } 100% { transform: scale(1); opacity: 1; } }
@@ -649,7 +714,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 }
 [data-theme="dark"] .driver-app { background: linear-gradient(180deg, #1d1140 0%, var(--bg) 26%); }
 [data-theme="dark"] .pay-state { background: var(--bg-soft); color: var(--muted); }
-[data-theme="dark"] .pay-state.ok { background: var(--primary-soft); color: var(--primary-dark); }
+[data-theme="dark"] .pay-state.ok { background: var(--primary-soft); color: var(--primary-ink); }
 [data-theme="dark"] .receipt { background: var(--bg-soft); }
 [data-theme="dark"] .back-link { background: rgba(20, 27, 45, 0.7); }
 [data-theme="dark"] .toast { background: #e9eef9; color: #0f1728; }
@@ -658,17 +723,17 @@ input:checked + .slider:before { transform: translateX(24px); }
 [data-theme="dark"] .pin-mode-btn { background: rgba(19, 28, 47, 0.95); color: var(--ink); }
 [data-theme="dark"] .star { color: #3a4660; }
 [data-theme="dark"] .online-strip { background: #3c1a26; color: #fca5a5; }
-[data-theme="dark"] .online-strip.up { background: var(--primary-soft); color: var(--primary-dark); }
+[data-theme="dark"] .online-strip.up { background: var(--primary-soft); color: var(--primary-ink); }
 [data-theme="dark"] .slider { background: #3c4a66; }
 
 /* ========================== Theme switcher ================================ */
 .theme-toggle {
   display: inline-flex; align-items: center; gap: 6px;
-  background: rgba(255, 255, 255, 0.16); color: #fff; border: 1px solid rgba(255, 255, 255, 0.3);
+  background: var(--chip-fill); color: #fff; border: 1px solid var(--chip-border);
   border-radius: 20px; padding: 6px 12px; font-size: 0.8rem; cursor: pointer; line-height: 1;
-  transition: background 0.2s;
+  min-height: 36px; transition: background 0.2s;
 }
-.theme-toggle:hover { background: rgba(255, 255, 255, 0.28); }
+.theme-toggle:hover { background: var(--chip-fill-hover); }
 
 /* ============================= Saved places =============================== */
 .saved-rows { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 2px; }
@@ -685,7 +750,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .saved-chip .saved-addr { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .saved-chip .saved-actions { margin-left: auto; display: flex; gap: 6px; flex-shrink: 0; }
 .saved-chip .mini { background: none; border: none; color: var(--muted); font-size: 0.85rem; cursor: pointer; padding: 4px 6px; border-radius: 8px; }
-.saved-chip .mini:hover { color: #fff; background: var(--danger); }
+.saved-chip .mini:hover { color: var(--on-danger); background: var(--danger); }
 .saved-chip.on { border-color: var(--primary); background: var(--primary-soft); }
 .saved-header-row { display: flex; align-items: center; justify-content: space-between; }
 .saved-add {
@@ -716,7 +781,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   flex: 1; padding: 11px; border: 2px solid var(--border); border-radius: var(--radius-sm); background: var(--card);
   color: var(--ink); font-weight: 700; cursor: pointer; font-size: 0.85rem; transition: border-color 0.15s, background 0.15s;
 }
-.schedule-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.schedule-chip.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
 .schedule-datetime { display: flex; gap: 8px; }
 .schedule-datetime input { flex: 1; margin-top: 0; }
 
@@ -724,7 +789,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .upcoming-card { border: 2px solid var(--info); border-left: 6px solid var(--info); }
 .upcoming-time { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; color: var(--info); font-size: 0.9rem; margin-bottom: 6px; }
 .activate-btn {
-  background: var(--gradient); color: #fff; border: none; border-radius: var(--radius-sm); padding: 12px; width: 100%;
+  background: var(--gradient-ink); color: #fff; border: none; border-radius: var(--radius-sm); padding: 12px; width: 100%;
   font-weight: 700; font-size: 0.95rem; cursor: pointer; margin-top: 10px;
   box-shadow: 0 6px 16px -6px rgba(22, 163, 74, 0.5);
 }
@@ -736,7 +801,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   padding: 8px 13px; font-size: 0.82rem; font-weight: 650; cursor: pointer; transition: border-color 0.15s, background 0.15s;
 }
 .fb-tag:hover { border-color: var(--border-strong); }
-.fb-tag.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.fb-tag.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
 
 /* ============================== Driver stats ============================== */
 .take-home { margin: 6px 0 2px; }
@@ -764,10 +829,10 @@ input:checked + .slider:before { transform: translateX(24px); }
 /* ======================== Landing online status ========================== */
 .online-strip {
   margin-bottom: 14px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 700;
-  background: var(--danger-soft); color: var(--danger);
-  border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
+background: var(--danger-soft); color: var(--danger-ink);
+border: 1px solid color-mix(in srgb, var(--danger) 22%, transparent);
 }
-.online-strip.up { background: var(--primary-soft); color: var(--primary-dark); border-color: color-mix(in srgb, var(--primary) 22%, transparent); }
+.online-strip.up { background: var(--primary-soft); color: var(--primary-ink); border-color: color-mix(in srgb, var(--primary) 22%, transparent); }
 
 /* ===================== Recent destinations (one-tap rebook) ===================== */
 .recent-dests { margin: 8px 0 4px; }
@@ -778,11 +843,11 @@ input:checked + .slider:before { transform: translateX(24px); }
   transition: border-color 0.15s, background 0.15s, color 0.15s; max-width: 100%; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap;
 }
-.recent-chip:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-dark); }
+.recent-chip:hover { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-ink); }
 
 /* ================================ Promo codes ================================= */
 .promo-badge {
-  align-self: flex-start; background: var(--primary-soft); color: var(--primary-dark);
+  align-self: flex-start; background: var(--primary-soft); color: var(--primary-ink);
   border: 1px solid color-mix(in srgb, var(--primary) 26%, transparent);
   border-radius: 12px; padding: 8px 12px; font-weight: 750; font-size: 0.85rem;
 }
@@ -804,7 +869,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   transition: border-color 0.15s, background 0.15s;
 }
 .reason-chip:hover { border-color: var(--border-strong); }
-.reason-chip.on { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.reason-chip.on { border-color: var(--danger); background: var(--danger-soft); color: var(--danger-ink); }
 
 /* ================================ Disputes =================================== */
 .dispute-row {
@@ -818,7 +883,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .onboard-head { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .onboard-icon {
   width: 68px; height: 68px; border-radius: 22px; display: flex; align-items: center; justify-content: center;
-  font-size: 2rem; background: var(--primary-soft); color: var(--primary-dark);
+  font-size: 2rem; background: var(--primary-soft); color: var(--primary-ink);
   border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
   box-shadow: 0 8px 22px -8px rgba(22, 163, 74, 0.4);
 }
@@ -839,7 +904,7 @@ input:checked + .slider:before { transform: translateX(24px); }
   transition: height 0.5s ease;
 }
 .bar-label { font-size: 0.7rem; color: var(--muted); font-weight: 700; }
-.bar-value { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bar-value { font-size: 0.72rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .hour-list { display: flex; flex-direction: column; gap: 8px; }
 .hour-row { display: flex; align-items: center; gap: 10px; }
 .hour-label { font-size: 0.8rem; font-weight: 700; width: 64px; }
@@ -848,12 +913,63 @@ input:checked + .slider:before { transform: translateX(24px); }
 .hour-count { font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 20px; text-align: right; }
 
 /* ====================== Leaflet "my location" control ======================== */
-.leaflet-control-locate button {
+.leaflet-control-locate button,
+.leaflet-control-recenter button {
   width: 36px; height: 36px; border: 1px solid var(--border); border-radius: 4px;
   background: var(--card); color: var(--ink); font-size: 1.05rem; cursor: pointer;
   display: flex; align-items: center; justify-content: center; line-height: 1;
 }
-.leaflet-control-locate button:hover { background: var(--bg-soft); }
+.leaflet-control-locate button:hover,
+.leaflet-control-recenter button:hover { background: var(--bg-soft); }
+.leaflet-control-locate button.busy { opacity: 0.55; cursor: progress; }
+.leaflet-control-recenter { animation: recenter-pulse 1.4s ease-in-out infinite; }
+@keyframes recenter-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 55%, transparent); }
+  50% { box-shadow: 0 0 0 9px color-mix(in srgb, var(--primary) 0%, transparent); }
+}
+
+/* OSM requires visible attribution, so keep it legible but out of the way. The
+   booking overlay sits just above it. */
+/* OSM requires the attribution stay visible, so it gets an opaque backdrop and
+   a readable size rather than the translucent 10px default. */
+.leaflet-control-zoom {
+  border: none !important; border-radius: 10px !important; overflow: hidden;
+  box-shadow: var(--shadow) !important;
+}
+.leaflet-control-zoom a {
+  width: 36px !important; height: 36px !important; line-height: 34px !important;
+  color: var(--ink) !important; background: var(--card) !important;
+  font-size: 18px !important; border-bottom: 1px solid var(--border) !important;
+}
+.leaflet-control-zoom a:hover { background: var(--bg-soft) !important; }
+.leaflet-bar { border: none !important; box-shadow: var(--shadow) !important; }
+.leaflet-bar a {
+  background: var(--card) !important; color: var(--ink) !important; border-bottom: 1px solid var(--border) !important;
+}
+.leaflet-bar a:hover { background: var(--bg-soft) !important; }
+
+.leaflet-control-attribution {
+  background: var(--card) !important;
+  color: var(--ink-soft); font-size: 0.72rem; padding: 3px 7px; border-radius: 8px 0 0 0;
+}
+.leaflet-control-attribution a { color: var(--info); }
+.leaflet-control-attribution a:hover { color: var(--primary-ink); }
+/* The attribution links are inline text, so they inherit a ~15px tap height.
+   inline-block + vertical padding grows the real hit area past the 32px
+   comfort threshold. Negative margins claw back the extra height so the
+   rendered bar does not grow and cover map content. */
+.leaflet-control-attribution a {
+  display: inline-block; padding: 10px 2px; line-height: 1.15; margin: -7px 0;
+}
+
+/* Shown when tiles can't be fetched. The pins stay exact, so this is a notice,
+   not an error. */
+.map-offline-note {
+  position: absolute; z-index: 900; top: 10px; left: 50%; transform: translateX(-50%);
+  max-width: 88%; background: rgba(15, 23, 42, 0.88); color: #fff; padding: 6px 12px;
+  border-radius: 14px; font-size: 0.72rem; font-weight: 600; text-align: center;
+  pointer-events: none; box-shadow: var(--shadow-sm);
+}
 
 /* ====================== Denser 6-up driver nav =============================== */
 .driver-app .bottom-nav { padding: 8px 4px calc(8px + env(safe-area-inset-bottom)); }
@@ -861,7 +977,7 @@ input:checked + .slider:before { transform: translateX(24px); }
 .driver-app .nav-icon { transform: scale(0.9); }
 
 .active-eta {
-  background: var(--primary-soft); color: var(--primary-dark); display: inline-block;
+  background: var(--primary-soft); color: var(--primary-ink); display: inline-block;
   border-radius: 10px; padding: 6px 11px; font-weight: 750; font-size: 0.87rem;
   margin: 6px 0 10px;
 }

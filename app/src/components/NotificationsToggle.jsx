@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { registerPush, unregisterPush, pushSupported } from '../push.js';
 
 export default function NotificationsToggle() {
   const [supported] = useState(() => pushSupported());
   const [enabled, setEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
+  const labelId = useId();
 
   useEffect(() => {
     if (!supported) return;
@@ -33,11 +34,21 @@ export default function NotificationsToggle() {
   }
 
   return (
-    <label className="switch-row">
-      <span>Push notifications {enabled ? 'on' : 'off'}</span>
-      <button type="button" className="switch" role="switch" aria-checked={enabled} disabled={busy} onClick={toggle}>
+    <div className="switch-row">
+      <span id={labelId}>Push notifications {enabled ? 'on' : 'off'}</span>
+      {/* A <label> cannot target a <button>, so associate via aria-labelledby.
+          The span carries the state wording the button's own label would miss. */}
+      <button
+        type="button"
+        className="switch"
+        role="switch"
+        aria-checked={enabled}
+        aria-labelledby={labelId}
+        disabled={busy}
+        onClick={toggle}
+      >
         <span className="knob" />
       </button>
-    </label>
+    </div>
   );
 }

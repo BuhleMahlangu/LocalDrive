@@ -57,9 +57,9 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
       <div className="brand-hero">
         <div className="brand-badge"><img src="/pwa-192.png" alt="DriveLocal logo" /></div>
         <h1>DriveLocal</h1>
-        <p>{isDriver ? t('login.taglineDriver') : t('login.taglineCustomer')}</p>
+        <p className="hero-tagline">{isDriver ? t('login.taglineDriver') : t('login.taglineCustomer')}</p>
         {onBack && (
-          <span className="back-link" onClick={onBack}>{t('login.changeRole')}</span>
+          <button type="button" className="back-link" onClick={onBack}>{t('login.changeRole')}</button>
         )}
       </div>
 

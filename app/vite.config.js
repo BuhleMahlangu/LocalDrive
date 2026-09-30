@@ -12,6 +12,24 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Map tiles are the one thing that can't be precached (the service
+        // area is unbounded), so they are cached as they are viewed. Without
+        // this the map is a blank grey grid the moment the signal drops —
+        // which is the normal case on a rural run. CacheFirst keeps repeat
+        // pans instant and works fully offline; the expiration cap and the
+        // tile limit keep the cache from growing without bound.
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/[abc]\.tile\.openstreetmap\.org\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'osm-tiles',
+              expiration: { maxEntries: 600, maxAgeSeconds: 30 * 24 * 60 * 60 },
+              cacheableResponse: { statuses: [0, 200] },
+              rangeRequests: true,
+            },
+          },
+        ],
       },
       manifest: {
         name: 'DriveLocal',

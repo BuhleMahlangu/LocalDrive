@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const repo = require('../db/repository');
 const config = require('../config');
-const { authRequired } = require('../middleware');
+const { authRequired, optionalAuth } = require('../middleware');
 const tripService = require('../services/trips');
 const push = require('../services/push');
 
@@ -14,10 +14,21 @@ function customerRoutes({ notify }) {
     res.json({ isOnline: repo.hasOnlineDriver() });
   });
 
-  // Public: driver's public details (for the booking screen) — the platform's
-  // representative "rate card" driver. The actual assigned driver is whoever
-  // claims the request.
-  router.get('/driver', (_req, res) => {
+  // Public: which driver is the customer getting?
+  //
+  // Anonymous visitors get the platform's representative "rate card" driver,
+  // which is what pricing previews and the booking-screen preview need. A
+  // signed-in customer with a live trip must instead get the driver actually
+  // assigned to them — returning the representative here would show the name,
+  // vehicle, plate and phone of someone who never accepted the ride.
+  router.get('/driver', optionalAuth, (req, res) => {
+    if (req.user) {
+      const active = repo.getActiveTripForCustomer(req.user.id);
+      if (active && active.driverId) {
+        const assigned = repo.getUserById(active.driverId);
+        if (assigned) return res.json(tripService.publicDriver(assigned));
+      }
+    }
     const driver = repo.getDriver();
     if (!driver) return res.status(404).json({ error: 'No driver configured' });
     res.json(tripService.publicDriver(driver));

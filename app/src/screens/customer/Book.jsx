@@ -4,6 +4,7 @@ import SavedPlacesBar, { SavePlaceBar } from '../../components/SavedPlaces.jsx';
 import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
 import geolocate from '../../lib/geolocate.js';
 import decodePolyline from '../../lib/polyline.js';
+import { nearestPoint } from '../../lib/geo.js';
 import { getOrFetch } from '../../lib/offlineCache.js';
 import { useI18n } from '../../i18n.jsx';
 
@@ -12,6 +13,18 @@ import { useI18n } from '../../i18n.jsx';
 // and the flow is built around landmarks + a free-text "describe this place" note
 // so the customer and driver can find each other easily.
 const AREA_CENTER = { lat: -26.2155, lng: 29.2916 }; // Thubelihle, Kriel
+
+// How long a pin must sit still before we price the trip. Long enough that
+// fine-tuning a pin costs one request, short enough to feel instant.
+const ESTIMATE_DEBOUNCE_MS = 400;
+
+// The app only operates inside this town. Allowing the map to be panned out into
+// the ocean serves no purpose and only wastes tile requests, so the view is
+// bounded generously around the service area.
+const AREA_BOUNDS = [
+  [AREA_CENTER.lat - 0.9, AREA_CENTER.lng - 0.9],
+  [AREA_CENTER.lat + 0.9, AREA_CENTER.lng + 0.9],
+];
 
 // Common landmarks used to describe informal places / drop a pin quickly.
 const LANDMARKS = [
@@ -23,7 +36,12 @@ const LANDMARKS = [
   { label: 'Corner', icon: '🔻' },
 ];
 
-export default function Book({ onBack, onRequest, presetDest }) {
+// `visible` is false while the customer sits on another tab. The shell keeps
+// this screen mounted to avoid refetching, but a hidden Leaflet map is still a
+// live map: it keeps pulling tiles and its controls stay in the DOM, so the
+// booking map and the live-trip map end up both active. Only build it when it
+// can actually be seen.
+export default function Book({ onBack, onRequest, presetDest, visible = true }) {
   const { t } = useI18n();
   const [pickup, setPickup] = useState(null);
   const [dest, setDest] = useState(presetDest || null);
@@ -114,10 +132,12 @@ export default function Book({ onBack, onRequest, presetDest }) {
   }, []);
 
   // Preset pickup spots (seeded server-side for the Kriel / Thubelihle area).
-  // Also cached offline-first.
+  // Also cached offline-first, but the cached copy must not pin the list: spots
+  // an admin adds later have to reach the customer without a re-login.
   useEffect(() => {
-    getOrFetch('pickup-spots', () => api('/pickup-spots').then((r) => ({ spots: Array.isArray(r.spots) ? r.spots : [] })))
-      .then((r) => setSpots(Array.isArray(r.spots) ? r.spots : []))
+    const apply = (r) => setSpots(Array.isArray(r.spots) ? r.spots : []);
+    getOrFetch('pickup-spots', () => api('/pickup-spots').then((r) => ({ spots: Array.isArray(r.spots) ? r.spots : [] })), apply)
+      .then(apply)
       .catch(() => {});
   }, []);
 
@@ -165,43 +185,82 @@ export default function Book({ onBack, onRequest, presetDest }) {
   }, []);
 
   // Recompute estimate + route when both points exist / change.
+  //
+  // Adjusting a pin fires this on every tap, and each run is a round trip to
+  // the routing provider. Two problems that caused: the requests raced, so a
+  // slow earlier response could land last and paint a route for a pin the
+  // customer had already moved off; and a customer nudging the pin around
+  // generated a burst of billable API calls. So: wait for the pin to settle,
+  // and cancel anything still in flight when it moves again.
   useEffect(() => {
     if (!pickup || !dest) {
       setEstimate(null);
       setRoute(null);
       setTrip(null);
-      return;
+      return undefined;
     }
+    const from = { lat: pickup.lat, lng: pickup.lng };
+    const to = { lat: dest.lat, lng: dest.lng };
+    const promo = promoApplied?.code || null;
+    const controller = new AbortController();
+    let cancelled = false;
+
     setLoading(true);
     setError('');
-    api('/customer/estimate', {
-      method: 'POST',
-      body: {
-        pickup,
-        destination: dest,
-        promoCode: promoApplied?.code || null,
-      },
-    })
-      .then((res) => {
-        setEstimate(res.estimate);
-        setTrip({ distanceKm: res.route?.distanceKm ?? null, durationMin: res.route?.durationMin ?? null });
-        if (res.route?.polyline) {
-          setRoute(decodePolyline(res.route.polyline));
-        } else {
-          setRoute([[pickup.lat, pickup.lng], [dest.lat, dest.lng]]);
-        }
+
+    const timer = setTimeout(() => {
+      api('/customer/estimate', {
+        method: 'POST',
+        body: { pickup, destination: dest, promoCode: promo },
+        signal: controller.signal,
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+        .then((res) => {
+          if (cancelled) return;
+          setEstimate(res.estimate);
+          setTrip({ distanceKm: res.route?.distanceKm ?? null, durationMin: res.route?.durationMin ?? null });
+          if (res.route?.polyline) {
+            setRoute(decodePolyline(res.route.polyline));
+          } else {
+            setRoute([[from.lat, from.lng], [to.lat, to.lng]]);
+          }
+        })
+        .catch((err) => {
+          // An abort is us changing our mind about the pins, not a failure.
+          if (cancelled || err?.name === 'AbortError') return;
+          setError(err.message);
+        })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    }, ESTIMATE_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [pickup, dest, promoApplied?.code]);
 
-  // Pick a pickup spot — used for both map-pin taps and the nearest-spot bar.
-  const applySpot = useCallback((spot) => {
+  // A preset spot as the pickup — map-pin taps and the nearest-spot bar.
+  const applySpotAsPickup = useCallback((spot) => {
     const label = spot.name || spot.address || 'Pickup spot';
     setPickup({ lat: spot.lat, lng: spot.lng, address: label, note: spot.address || spot.note || null });
     setPickupNote(spot.address || spot.note || '');
     setLocateError(false);
   }, []);
+
+  // The same spot as the drop-off. These presets serve both ends of the trip.
+  const applySpotAsDest = useCallback((spot) => {
+    const label = spot.name || spot.address || 'Destination spot';
+    setDest({ lat: spot.lat, lng: spot.lng, address: label, note: spot.address || spot.note || null });
+    setDestNote(spot.address || spot.note || '');
+  }, []);
+
+  // Tapping a green dot fills whichever pin is currently active. The first spot
+  // a customer picks is always their pickup — there is no drop-off to choose
+  // until a pickup exists, and the overlay tells them to start there.
+  const applySpot = useCallback((spot) => {
+    if (activePin === 'destination' && pickup) return applySpotAsDest(spot);
+    return applySpotAsPickup(spot);
+  }, [activePin, pickup, applySpotAsDest, applySpotAsPickup]);
 
   // Map gives us the pinned object directly (spot, or the marker descriptor when
   // there is no stored spot), so unwrap .spot defensively and fall back to the
@@ -212,17 +271,18 @@ export default function Book({ onBack, onRequest, presetDest }) {
   // customer fix a wrongly-placed pickup or destination by tapping again.
   const onMapClick = useCallback((e) => {
     const { lat, lng } = e.latlng;
-    // Forgiving mobile taps: when a pickup is being chosen, a tap landing on or
-    // within 70 m of a preset spot selects that spot instead of dropping a raw
-    // pin — so "tap the nearest green dot" always works, even if the dot is small.
-    if (!pickup || activePin === 'pickup') {
-      const near = nearestSpotTo(lat, lng, spots);
-      if (near && near.m < 70) {
-        applySpot(near.spot);
-        return;
-      }
+    // Forgiving mobile taps: a tap landing on or within 70 m of a preset spot
+    // selects that spot instead of dropping a raw pin — so "tap the nearest
+    // green dot" always works, even if the dot is small. This applies to
+    // whichever pin is active, since the same spots serve pickup and drop-off.
+    const near = nearestSpotTo(lat, lng, spots);
+    if (near && near.m < 70) {
+      applySpot(near.spot);
+      return;
     }
-    if (activePin === 'pickup') {
+    // Until the pickup exists, a raw tap is the pickup — otherwise the customer
+    // would set a drop-off with nothing to be dropped off from.
+    if (activePin === 'pickup' || !pickup) {
       setPickup({ lat, lng, address: pickup?.address && !pickup.address.startsWith('Current location') ? pickup.address : 'Current location', note: pickupNote });
     } else {
       // Moving the destination: clear the stale label; the note field holds the
@@ -285,7 +345,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
   const markers = useMemo(() => {
     const m = [];
     if (you) m.push({ lat: you.lat, lng: you.lng, type: 'you', accuracy: you.accuracy });
-    spots.forEach((s) => m.push({ lat: s.lat, lng: s.lng, type: 'spot', spot: s }));
+    spots.forEach((s) => m.push({ lat: s.lat, lng: s.lng, type: 'spot', name: s.name, spot: s }));
     if (pickup) m.push({ lat: pickup.lat, lng: pickup.lng, type: 'home', accuracy: pickup.accuracy });
     if (dest) m.push({ lat: dest.lat, lng: dest.lng, type: 'dest' });
     return m;
@@ -293,13 +353,8 @@ export default function Book({ onBack, onRequest, presetDest }) {
 
   // The nearest preset pickup spot to the customer's red dot.
   const nearest = useMemo(() => {
-    if (!you || !spots.length) return null;
-    let best = null;
-    for (const s of spots) {
-      const d = metersApart(you, s);
-      if (!best || d < best.m) best = { spot: s, m: d };
-    }
-    return best;
+    const best = you ? nearestPoint(you, spots) : null;
+    return best ? { spot: best.point, m: best.m } : null;
   }, [you, spots]);
 
   const fmtMeters = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
@@ -360,6 +415,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
           <textarea
             className="place-note"
             rows={2}
+            aria-label="Pickup directions"
             placeholder="Describe how to find this spot (e.g. opposite the red shop, next to the big tree, near the water tank)…"
             value={pickupNote}
             onChange={(e) => setPickupNote(e.target.value)}
@@ -426,6 +482,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
           <textarea
             className="place-note"
             rows={2}
+            aria-label={t('book.destNotePh')}
             placeholder={t('book.destNotePh')}
             value={destNote}
             onChange={(e) => setDestNote(e.target.value)}
@@ -454,7 +511,7 @@ export default function Book({ onBack, onRequest, presetDest }) {
       </div>
 
       {you && nearest && !pickup && (
-        <button type="button" className="nearest-bar" onClick={() => applySpot(nearest.spot)}>
+        <button type="button" className="nearest-bar" onClick={() => applySpotAsPickup(nearest.spot)}>
           📍 Nearest pickup: {nearest.spot.name || nearest.spot.address || 'Pickup spot'} · {fmtMeters(nearest.m)} — use this
         </button>
       )}
@@ -477,22 +534,29 @@ export default function Book({ onBack, onRequest, presetDest }) {
           </button>
         </div>
 
-        <Map
-          center={mapCenter}
-          markers={markers}
-          route={route}
-          onMapClick={onMapClick}
-          onSpotClick={onSpotClick}
-          autofitSpots={!(pickup && dest)}
-        />
+        {visible && (
+          <Map
+            center={mapCenter}
+            markers={markers}
+            route={route}
+            onMapClick={onMapClick}
+            onSpotClick={onSpotClick}
+            autofitSpots={!(pickup && dest)}
+            maxBounds={AREA_BOUNDS}
+          />
+        )}
         {!pickup ? (
           <div className="map-overlay">
             {spots.length ? 'Tap the nearest green dot to set your pickup' : 'Tap the map to set your pickup'}
           </div>
         ) : !dest && activePin === 'destination' ? (
-          <div className="map-overlay">Tap the map to drop your destination pin</div>
+          <div className="map-overlay">
+            {spots.length ? 'Tap a green dot to drop off there, or tap the map for any other point' : 'Tap the map to drop your destination pin'}
+          </div>
         ) : activePin === 'pickup' ? (
-          <div className="map-overlay">Tap the map to set / fix your pickup spot</div>
+          <div className="map-overlay">
+            {spots.length ? 'Tap a green dot to set / fix your pickup' : 'Tap the map to set / fix your pickup spot'}
+          </div>
         ) : (
           <div className="map-status">Tap the map to move the {activePin === 'pickup' ? 'pickup' : 'destination'} pin</div>
         )}
@@ -618,25 +682,9 @@ function defaultSchedule() {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function metersApart(a, b) {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const la = (a.lat * Math.PI) / 180;
-  const lb = (b.lat * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(la) * Math.cos(lb) * Math.sin(dLng / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
 function nearestSpotTo(lat, lng, spots) {
-  let best = null;
-  for (const s of spots) {
-    const d = metersApart({ lat, lng }, s);
-    if (!best || d < best.m) best = { spot: s, m: d };
-  }
-  return best;
+  const best = nearestPoint({ lat, lng }, spots);
+  return best ? { spot: best.point, m: best.m } : null;
 }
 
 function geoMessage(code) {

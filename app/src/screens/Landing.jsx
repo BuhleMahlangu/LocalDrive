@@ -19,7 +19,7 @@ export default function Landing({ onChoose }) {
       <div className="brand-hero">
         <div className="brand-badge"><img src="/pwa-192.png" alt="DriveLocal logo" /></div>
         <h1>DriveLocal</h1>
-        <p>{t('landing.tagline')}</p>
+        <p className="hero-tagline">{t('landing.tagline')}</p>
       </div>
 
       <div className="card landing-card">

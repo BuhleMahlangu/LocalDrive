@@ -33,6 +33,24 @@ function authRequired(roles) {
   };
 }
 
+// Resolve the caller when a valid token is present, but never reject. For
+// endpoints that are safe to call anonymously yet can personalise their answer —
+// e.g. "which driver am I getting?" is the platform rate card for a browser, but
+// the driver actually assigned to a signed-in customer with a live trip.
+function optionalAuth(req, _res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return next();
+  try {
+    const payload = jwt.verify(token, config.jwtSecret);
+    const user = repo.getUserById(payload.sub);
+    if (user) req.user = user;
+  } catch {
+    /* treat an unusable token as anonymous rather than failing the request */
+  }
+  return next();
+}
+
 function notFound(req, res) {
   res.status(404).json({ error: 'Not found' });
 }
@@ -64,4 +82,4 @@ function errorHandler(err, req, res, _next) {
   });
 }
 
-module.exports = { authRequired, signToken, approvedDriverOnly, adminOnly, notFound, errorHandler };
+module.exports = { authRequired, optionalAuth, signToken, approvedDriverOnly, adminOnly, notFound, errorHandler };

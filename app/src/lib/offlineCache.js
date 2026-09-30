@@ -53,11 +53,18 @@ async function getItem(key) {
 }
 
 // "Get or fetch": returns cached data instantly, refreshes it in the background,
-// and falls back to the cache on network failure.
-export async function getOrFetch(key, fetcher) {
+// and falls back to the cache on network failure. When that background refresh
+// lands, onFresh is called with the new value so callers holding the old one in
+// React state can re-render instead of staying stale until the next mount.
+export async function getOrFetch(key, fetcher, onFresh) {
   const cached = await getItem(key);
   if (cached != null) {
-    fetcher().then((fresh) => setItem(key, fresh)).catch(() => {});
+    fetcher()
+      .then((fresh) => {
+        setItem(key, fresh);
+        if (onFresh) onFresh(fresh);
+      })
+      .catch(() => {});
     return cached;
   }
   try {

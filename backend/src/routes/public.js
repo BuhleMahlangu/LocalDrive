@@ -35,7 +35,9 @@ function publicRoutes() {
         vehicleType: driver.vehicleType,
         licensePlate: driver.licensePlate,
       } : null,
-      driverLoc: driverLoc ? { lat: driverLoc.lat, lng: driverLoc.lng } : null,
+      driverLoc: driverLoc
+        ? { lat: driverLoc.lat, lng: driverLoc.lng, heading: driverLoc.heading ?? null }
+        : null,
       polyline: trip.routePolyline || null,
       updatedAt: new Date().toISOString(),
     });

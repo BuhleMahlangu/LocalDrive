@@ -22,25 +22,38 @@ server.listen(config.port, () => {
   console.log(`Currency: ${config.currency.toUpperCase()} | DB driver: ${config.dbDriver}`);
 
   // Auto-activate scheduled trips whose scheduled_at time has passed.
-  // Runs every 30s; moves them into the live request flow so the driver can accept.
+  // Runs every 30s; moves them into the live request flow so a driver can accept.
   const repo = require('./db/repository');
   const tripService = require('./services/trips');
   setInterval(() => {
+    const now = new Date().toISOString();
+    let rows = [];
     try {
-      const now = new Date().toISOString();
-      const rows = repo.db.prepare(
+      rows = repo.db.prepare(
         `SELECT id FROM trips WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?`,
       ).all(now);
-      for (const row of rows) {
-        const trip = tripService.activateScheduledTrip(row.id);
-        const driver = repo.getDriver();
-        if (driver) {
-          notify.newTripToDriver(trip, driver.id, {});
-          notify.tripUpdated(trip);
-        }
-      }
     } catch (e) {
-      console.error('[scheduler] error activating scheduled trips:', e.message);
+      console.error('[scheduler] could not list due trips:', e.message);
+      return;
+    }
+
+    for (const row of rows) {
+      // Per-row guard: one bad trip must not abort the rest of the batch.
+      try {
+        const trip = tripService.releaseScheduledTrip(row.id);
+        if (!trip) continue;
+        // Fan out to every online approved driver, the same way an immediate
+        // booking is dispatched — not to one representative driver.
+        const representative = repo.getDriver();
+        const driverPublic = representative ? tripService.publicDriver(representative) : {};
+        for (const d of repo.listOnlineDrivers()) {
+          notify.newTripToDriver(trip, d.id, driverPublic);
+        }
+        notify.tripUpdated(trip);
+        console.log(`[scheduler] released scheduled trip ${trip.id} for dispatch`);
+      } catch (e) {
+        console.error(`[scheduler] error releasing trip ${row.id}:`, e.message);
+      }
     }
   }, 30_000);
 });

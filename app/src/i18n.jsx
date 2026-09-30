@@ -21,6 +21,24 @@ const EN = {
   'common.skip': 'Skip',
   'common.next': 'Next',
   'common.done': 'Done',
+  'common.logout': 'Log out',
+  'common.customerMode': 'Customer mode',
+  'common.driverMode': 'Driver mode',
+  'common.pickup': 'Pickup',
+  'common.destination': 'Destination',
+  'common.tip': 'Tip',
+  'common.receipt': 'Receipt',
+  'common.hideReceipt': 'Hide receipt',
+
+  // Navigation
+  'nav.home': 'Home',
+  'nav.trips': 'Trips',
+  'nav.insights': 'Insights',
+  'nav.payouts': 'Payouts',
+  'nav.admin': 'Admin',
+  'nav.profile': 'Profile',
+  'trips.empty': 'No trips yet.',
+  'trips.customer': 'Customer',
 
   // Landing
   'landing.tagline': "Thubelihle & Kriel's friendly local ride — book in seconds.",
@@ -99,6 +117,18 @@ const EN = {
   'trip.ongoing': 'Trip in progress',
   'trip.completed': 'Trip complete',
   'trip.cancelled': 'Trip cancelled',
+  'trip.scheduled': 'Scheduled for later',
+
+  // Short status labels for history rows and badges.
+  'status.requested': 'Requested',
+  'status.accepted': 'On the way',
+  'status.ongoing': 'In progress',
+  'status.completed': 'Completed',
+  'status.cancelled': 'Cancelled',
+  'status.scheduled': 'Scheduled',
+  'status.suspended': 'Suspended',
+  'status.rejected': 'Rejected',
+  'status.pending': 'Pending',
   'trip.cancel': 'Cancel ride',
   'trip.home': '‹ Home',
   'trip.waiting': 'Waiting for your driver to accept…',
@@ -138,6 +168,27 @@ const ZU = {
   'common.phone': 'Inombolo yocingo',
   'common.name': 'Igama',
   'common.save': 'Londoloza',
+  'common.skip': 'Kwedaba',
+  'common.next': 'Olandelayo',
+  'common.done': 'Kwenziwe',
+  'common.logout': 'Phuma',
+  'common.customerMode': 'Imo yehasimende',
+  'common.driverMode': 'Imo yomshayeli',
+  'common.pickup': 'Ukulanda',
+  'common.destination': 'Inda yokugxila',
+  'common.tip': 'Inani lokuphelele',
+  'common.receipt': 'Iresithi',
+  'common.hideReceipt': 'Bonga ukubuthwa',
+
+  // Navigation
+  'nav.home': 'Ikhaya',
+  'nav.trips': 'Amahambo',
+  'nav.insights': 'Izinsizakalo',
+  'nav.payouts': 'Imali ekhokhelwayo',
+  'nav.admin': 'Ukuhlelwa',
+  'nav.profile': 'Iphrofayela',
+  'trips.empty': 'Akusikho uhambo okwenziwe.',
+  'trips.customer': 'Umthengi',
 
   'landing.tagline': 'Uhambo oluthile lwase-Thubelihle ne-Kriel — bhuka emizuzwaneni.',
   'landing.online': 'usemgwaqweni — bhuka uhambo manje',
@@ -209,6 +260,18 @@ const ZU = {
   'trip.ongoing': 'Uhambo luyaqhubeka',
   'trip.completed': 'Uhambo luphelile',
   'trip.cancelled': 'Uhambo lukhanseliwe',
+  'trip.scheduled': 'Kuhlelelwe ngokuhlater',
+
+  // Short status labels for history rows and badges.
+  'status.requested': 'Kuceliwe',
+  'status.accepted': 'Usemgwaqweni',
+  'status.ongoing': 'Iyaqhubeka',
+  'status.completed': 'Iphelile',
+  'status.cancelled': 'Ikhanseliwe',
+  'status.scheduled': 'Kuhlelelwe',
+  'status.suspended': 'Isimelelwe',
+  'status.rejected': 'Yenqatsiwe',
+  'status.pending': 'Ilinde',
   'trip.cancel': 'Khansela uhambo',
   'trip.home': '‹ Ikhaya',
   'trip.waiting': 'Linda umshayeli ukuthi amukele…',
@@ -265,7 +328,17 @@ export function LangProvider({ children }) {
     return str;
   }, [lang]);
 
-  const value = useMemo(() => ({ lang, setLang, t }), [lang, t]);
+  const value = useMemo(
+    () => ({
+      lang,
+      setLang,
+      t,
+      // Trip/driver statuses are enums from the API. Always route them through
+      // one helper so a screen can never leak a raw `cancelled` to the user.
+      statusLabel: (s) => (s ? t(`status.${s}`) : ''),
+    }),
+    [lang, t]
+  );
 
   return <LangContext.Provider value={value}>{children}</LangContext.Provider>;
 }
