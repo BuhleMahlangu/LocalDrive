@@ -7,11 +7,22 @@ const driver = config.dbDriver || 'sqlite';
 
 // ---- Postgres/PostGIS driver (production target) ----
 // Schema is applied out-of-band (backend/schema.sql contains the full DDL,
-// including PostGIS geography columns). The async `pg` adapter is the seam;
-// repository.js becomes async-aware for the migration. If `pg` or DATABASE_URL
-// are missing we fail loudly rather than silently corrupting the app.
+// including PostGIS geography columns).
+//
+// NOTE: the Postgres adapter in query.js executes async queries and returns
+// promises, but repository.js still consumes its methods synchronously
+// (better-sqlite3-style). Selecting postgres today would silently return
+// promise-shaped objects through every repository call — truthy shells whose
+// fields are all undefined — which corrupts auth, trips and payments without
+// erroring. Block the switch until the repository is async-aware; see
+// docs/postgres-migration.md for the porting guide.
 if (driver === 'postgres') {
-  module.exports = createAdapter({ driver });
+  throw new Error(
+    'DB_DRIVER=postgres is not supported yet: the Postgres adapter returns awaited '
+    + 'promises but src/db/repository.js still uses the synchronous better-sqlite3 '
+    + 'surface. Follow docs/postgres-migration.md to make the repository async-aware '
+    + 'before switching. Until then, keep DB_DRIVER=sqlite.',
+  );
 } else {
   const Database = require('better-sqlite3');
 
@@ -368,6 +379,17 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   );
   CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
 `);
+
+  // ---- Performance indices (mirror of the Postgres target schema) ----
+  // Safe to re-run on every boot; missing indices are cheap to add even to an
+  // existing database, and duplicate creation is a no-op.
+  sqliteDb.exec(`
+  CREATE INDEX IF NOT EXISTS idx_trips_customer ON trips(customer_id, requested_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_trips_driver   ON trips(driver_id, requested_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_trips_status   ON trips(status);
+  CREATE INDEX IF NOT EXISTS idx_payments_trip  ON payments(trip_id);
+  CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id);
+  `);
 
   // ---- Seed a demo promo code ----
   sqliteDb.prepare(`INSERT OR IGNORE INTO promo_codes (id, code, discount_percent, max_uses, valid_until)

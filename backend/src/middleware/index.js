@@ -76,6 +76,7 @@ function adminOnly(req, res, next) {
 function errorHandler(err, req, res, _next) {
   logError(err, req);
   const status = err.status || 500;
+  if (err.retryAfterSec) res.set('Retry-After', String(err.retryAfterSec));
   res.status(status).json({
     error: err.message || 'Internal server error',
     code: err.code,

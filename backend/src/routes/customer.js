@@ -178,7 +178,7 @@ function customerRoutes({ notify }) {
   // Cancel my booking.
   router.post('/trips/:id/cancel', async (req, res, next) => {
     try {
-      const trip = await tripService.cancelTrip(req.params.id, 'customer', req.body.reason);
+      const trip = await tripService.cancelTrip(req.params.id, 'customer', req.body.reason, req.user.id);
       notify.tripUpdated(trip);
       res.json({ trip });
     } catch (e) { next(e); }

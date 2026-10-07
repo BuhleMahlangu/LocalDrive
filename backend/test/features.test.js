@@ -55,7 +55,8 @@ test('scheduled trip is created with status scheduled and stays out of the reque
     scheduledAt: '2099-01-01T08:00:00Z',
   });
   assert.equal(trip.status, 'scheduled');
-  assert.equal(trip.scheduledAt, '2099-01-01T08:00:00Z');
+  // The stored value is a normalised UTC instant, not the raw wall-clock string.
+  assert.equal(trip.scheduledAt, '2099-01-01T08:00:00.000Z');
 
   // A scheduled trip should not appear as the latest requested trip.
   const pending = repo.getLatestRequestedTrip();
@@ -81,7 +82,7 @@ test('a scheduled trip can be cancelled before it is activated', async () => {
   });
   assert.equal(trip.status, 'scheduled');
 
-  const cancelled = await tripService.cancelTrip(trip.id, 'customer', 'Changed my mind');
+  const cancelled = await tripService.cancelTrip(trip.id, 'customer', 'Changed my mind', customer.id);
   assert.equal(cancelled.status, 'cancelled');
   assert.equal(cancelled.cancelReason, 'Changed my mind');
 

@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
 const push = require('../services/push');
+const tripService = require('../services/trips');
 
 // Socket.io real-time layer.
 // Rooms: `user:{id}` for direct pushes; `driver-location` for location broadcasts.
@@ -25,6 +26,11 @@ function initSocket(httpServer, corsOrigins) {
   const lastFixes = new Map();
   const spoofStreak = new Map();
   const MAX_SPOOF_KM = 50; // max plausible distance between pings (3s apart)
+  // Server-side publish throttle: the client samples at 3s and the DB does
+  // its own rate checks, but a misbehaving/scripted socket could flood at
+  // 1Hz+. Drop anything more frequent than once a second.
+  const lastLocAt = new Map();
+  const MIN_LOCATION_MS = 1000;
 
   function isPlausible(lat, lng) {
     return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
@@ -122,6 +128,10 @@ function initSocket(httpServer, corsOrigins) {
       const { lat, lng, heading, accuracy } = payload || {};
       if (typeof lat !== 'number' || typeof lng !== 'number') return;
       if (!isPlausible(lat, lng)) return;
+      const nowMs = Date.now();
+      const last = lastLocAt.get(id) || 0;
+      if (nowMs - last < MIN_LOCATION_MS) return; // client-side throttle copies
+      lastLocAt.set(id, nowMs);
       if (isSpoofed(id, lat, lng, accuracy)) return;
       repo.upsertDriverLocation(id, { lat, lng, heading, accuracy });
 
@@ -152,12 +162,17 @@ function initSocket(httpServer, corsOrigins) {
       if (isOnline) clearOfflineTimer(id);
     });
 
-    // Driver accepts/declines a requested trip.
-    socket.on('trip:accept', (tripId) => {
-      if (!isActiveDriver()) return;
-      const trip = repo.getTripById(tripId);
-      if (trip) {
-        io.to(`user:${trip.customerId}`).emit('trip:accepted', { trip: serializeTrip(trip) });
+    // Driver accepts a requested trip. Same guarded path as the REST endpoint:
+    // an atomic claim — otherwise any driver could spoof "accepted" to a
+    // customer, or two drivers could both think they own the ride.
+    socket.on('trip:accept', async (tripId) => {
+      if (!isActiveDriver() || !tripId) return;
+      try {
+        const trip = await tripService.acceptTrip(tripId, id);
+        notify.tripAccepted(trip);
+        notify.tripUpdated(trip);
+      } catch {
+        // Gone, taken by another driver, or not claimable — no-op.
       }
     });
 

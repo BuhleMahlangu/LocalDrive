@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const repo = require('../db/repository');
 const config = require('../config');
-const { authRequired, approvedDriverOnly } = require('../middleware');
+const { authRequired, approvedDriverOnly, adminOnly } = require('../middleware');
 const tripService = require('../services/trips');
 const payments = require('../services/payments');
 const pricing = require('../services/pricing');
@@ -220,12 +220,12 @@ function driverRoutes({ notify }) {
     res.json(repo.getDriverAnalytics(req.user.id));
   });
 
-  // Open fare disputes (driver view) + resolution.
-  router.get('/disputes', (_req, res) => {
+  // Fare disputes management is an owner function (resolutions change money).
+  router.get('/disputes', adminOnly, (_req, res) => {
     res.json({ disputes: repo.listOpenDisputes() });
   });
 
-  router.post('/disputes/:id/resolve', (req, res, next) => {
+  router.post('/disputes/:id/resolve', adminOnly, (req, res, next) => {
     try {
       const { resolution } = req.body;
       const dispute = repo.resolveDispute(req.params.id, resolution || 'Resolved');
@@ -233,12 +233,12 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Promo code management (driver/admin side).
-  router.get('/promos', (_req, res) => {
+  // Promo code management (owner only — a discount coupon moves real money).
+  router.get('/promos', adminOnly, (_req, res) => {
     res.json({ promos: repo.listPromos() });
   });
 
-  router.post('/promos', (req, res, next) => {
+  router.post('/promos', adminOnly, (req, res, next) => {
     try {
       const { code, discountPercent, maxUses, validUntil } = req.body;
       if (!code || !/^[A-Z0-9]{3,20}$/.test(String(code).toUpperCase())) {
@@ -314,7 +314,7 @@ function driverRoutes({ notify }) {
       if (!['accepted', 'ongoing'].includes(trip.status)) {
         return res.status(409).json({ error: 'This trip cannot be cancelled' });
       }
-      const updated = await tripService.cancelTrip(req.params.id, 'driver', req.body.reason || 'Cancelled by driver');
+      const updated = await tripService.cancelTrip(req.params.id, 'driver', req.body.reason || 'Cancelled by driver', req.user.id);
       notify.tripUpdated(updated);
       res.json({ trip: updated });
     } catch (e) { next(e); }
@@ -330,10 +330,9 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // ----- Admin settings (owner driver only, like all driver routes) -----
-  // Runtime knobs with env-configured defaults: pricing can also be edited via
-  // the profile endpoint, so this covers platform fee + auto-offline grace.
-  router.get('/settings', (_req, res) => {
+  // ----- Admin settings (owner only — they move the platform fee and the
+  // auto-offline behaviour everyone depends on) -----
+  router.get('/settings', adminOnly, (_req, res) => {
     const defaults = {
       platform_fee_percent: config.platformFeePercent,
       auto_offline_grace_ms: config.autoOfflineGraceMs,
@@ -343,7 +342,7 @@ function driverRoutes({ notify }) {
     res.json({ settings: { ...defaults, ...saved } });
   });
 
-  router.put('/settings', (req, res, next) => {
+  router.put('/settings', adminOnly, (req, res, next) => {
     try {
       const { platform_fee_percent, auto_offline_grace_ms } = req.body || {};
       if (platform_fee_percent != null) {

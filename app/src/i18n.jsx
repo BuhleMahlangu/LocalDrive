@@ -197,6 +197,7 @@ const ZU = {
   'landing.driver': 'Ngena njengo-mshayeli',
   'landing.customerShort': 'Ikhasimende',
   'landing.driverShort': 'Umshayeli',
+  'landing.remember': 'Khumbula imininingwane yami',
 
   'login.sendOtp': 'Ngithumele ikhodi',
   'login.verify': 'Qinisekisa & qhubeka',
@@ -233,6 +234,7 @@ const ZU = {
   'home.base': 'Base',
   'home.onlineCheck': 'Bheka ukuthi si-uku-inthanethi yini ngokuthepha “Bhuka uhambo”.',
   'home.callDriver': 'Shayela umshayeli',
+  'home.roundTrip': 'Uhambo oluya nokubuya',
   'home.tapToBook': 'Thepha “Bhuka uhambo” ukuze ungeze ikhaya, umsebenzi nezinye izindawo.',
 
   'book.title': 'Buka uhambo',

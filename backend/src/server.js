@@ -26,12 +26,18 @@ server.listen(config.port, () => {
   const repo = require('./db/repository');
   const tripService = require('./services/trips');
   setInterval(() => {
-    const now = new Date().toISOString();
+    const now = new Date().getTime();
     let rows = [];
     try {
+      // Fetch every still-scheduled trip and filter in JS: stored times are
+      // UTC ISO now, but dev databases may hold legacy wall-clock strings from
+      // before normalization, so a plain SQL string comparison would be wrong.
       rows = repo.db.prepare(
-        `SELECT id FROM trips WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?`,
-      ).all(now);
+        `SELECT id, scheduled_at FROM trips WHERE status = 'scheduled' AND scheduled_at IS NOT NULL`,
+      ).all().filter((r) => {
+        const t = new Date(r.scheduled_at).getTime();
+        return !Number.isNaN(t) && t <= now;
+      });
     } catch (e) {
       console.error('[scheduler] could not list due trips:', e.message);
       return;

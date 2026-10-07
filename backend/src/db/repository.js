@@ -738,15 +738,19 @@ module.exports = {
   },
 
   markPaymentSucceeded(tripId, { paymentIntentId, driverPayoutCents, platformFeeCents }) {
+    // A refunded payment is terminal — a late success must never resurrect it.
     db.prepare(
       `UPDATE payments SET status = 'succeeded', payment_intent_id = ?, driver_payout_cents = ?,
-       platform_fee_cents = ?, paid_at = ? WHERE trip_id = ?`,
+       platform_fee_cents = ?, paid_at = ? WHERE trip_id = ? AND status <> 'refunded'`,
     ).run(paymentIntentId || null, driverPayoutCents ?? null, platformFeeCents ?? 0, now(), tripId);
     return this.getPaymentByTrip(tripId);
   },
 
   markPaymentFailed(tripId) {
-    db.prepare("UPDATE payments SET status = 'failed' WHERE trip_id = ?").run(tripId);
+    // Never regress a succeeded or refunded payment (out-of-order webhooks).
+    db.prepare(
+      `UPDATE payments SET status = 'failed' WHERE trip_id = ? AND status NOT IN ('succeeded', 'refunded')`,
+    ).run(tripId);
     return this.getPaymentByTrip(tripId);
   },
 

@@ -96,7 +96,9 @@ CREATE TABLE IF NOT EXISTS trips (
   accepted_at    TIMESTAMPTZ,
   started_at     TIMESTAMPTZ,
   completed_at   TIMESTAMPTZ,
-  cancelled_at   TIMESTAMPTZ
+  cancelled_at   TIMESTAMPTZ,
+  arrived_at     TIMESTAMPTZ,   -- driver reached the pickup (customer steps out)
+  fare_confirmed_at TIMESTAMPTZ -- customer agreed the final fare
 );
 CREATE INDEX IF NOT EXISTS idx_trips_customer ON trips(customer_id, requested_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trips_driver   ON trips(driver_id, requested_at DESC);
@@ -151,6 +153,68 @@ CREATE TABLE IF NOT EXISTS saved_places (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id);
+
+-- Preset pickup spots for the Kriel / Thubelihle service area (admin-managed).
+CREATE TABLE IF NOT EXISTS pickup_spots (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  category   TEXT NOT NULL DEFAULT 'spot',
+  address    TEXT,
+  lat        DOUBLE PRECISION NOT NULL,
+  lng        DOUBLE PRECISION NOT NULL,
+  note       TEXT,
+  sort       INTEGER NOT NULL DEFAULT 0,
+  active     BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Runtime settings (platform fee %, auto-offline grace) editable from Admin.
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Customer-opened fare disputes, resolved by the owner.
+CREATE TABLE IF NOT EXISTS fare_disputes (
+  id          TEXT PRIMARY KEY,
+  trip_id     TEXT NOT NULL REFERENCES trips(id),
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  reason      TEXT,
+  status      TEXT NOT NULL DEFAULT 'open',   -- 'open' | 'resolved' | 'rejected'
+  resolution  TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_at TIMESTAMPTZ
+);
+
+-- Promo codes (discount coupons the owner creates).
+CREATE TABLE IF NOT EXISTS promo_codes (
+  id               TEXT PRIMARY KEY,
+  code             TEXT UNIQUE NOT NULL,
+  discount_percent INTEGER NOT NULL DEFAULT 10,
+  max_uses         INTEGER NOT NULL DEFAULT 50,
+  used_count       INTEGER NOT NULL DEFAULT 0,
+  valid_from       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  valid_until      TIMESTAMPTZ,
+  active           BOOLEAN NOT NULL DEFAULT true,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Customer rebook shortcuts (frequent destinations, one-tap).
+CREATE TABLE IF NOT EXISTS recent_destinations (
+  id             TEXT PRIMARY KEY,
+  user_id        TEXT NOT NULL REFERENCES users(id),
+  dest_address   TEXT,
+  dest_lat       DOUBLE PRECISION,
+  dest_lng       DOUBLE PRECISION,
+  dest_note      TEXT,
+  pickup_address TEXT,
+  pickup_lat     DOUBLE PRECISION,
+  pickup_lng     DOUBLE PRECISION,
+  used_count     INTEGER NOT NULL DEFAULT 1,
+  last_used      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- In-trip chat between customer and driver (one thread per trip).
 CREATE TABLE IF NOT EXISTS trip_messages (

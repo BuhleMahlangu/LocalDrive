@@ -10,7 +10,10 @@
 //
 // The Postgres adapter executes async queries and returns { rows }. It is a
 // working seam rather than a full port: callers that need it (repository.js)
-// must become async-aware, which is the documented migration path.
+// must become async-aware, which is the documented migration path — see
+// docs/postgres-migration.md. Until that port lands, connection.js refuses to
+// start with DB_DRIVER=postgres so the sync repository can't silently corrupt
+// data against an async adapter.
 
 const CACHE_LIMIT = 500; // guard against unbounded prepared-statement cache
 

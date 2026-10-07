@@ -15,10 +15,12 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   const { t } = useI18n();
   const [view, setView] = useState('dashboard');
 
-  // The Dashboard runs a live geolocation loop and socket while mounted, so it is
-  // torn down when you leave it. Trips and Profile are light, one-shot screens
-  // and stay mounted (hidden via CSS) so switching between them never rebuilds
-  // them (which re-fired API calls and replayed mount animations -> flicker).
+  // The Dashboard runs the live geolocation loop and the socket that keeps the
+  // driver online and receiving requests, so it is mounted once and only
+  // hidden — never torn down — when you switch tabs. Unmounting it dropped the
+  // socket, and after the auto-offline grace period the driver silently went
+  // offline while their app still said "Online". Trips/Profile etc. are light
+  // one-shot screens and are hidden (via CSS) the same way.
   const showDashboard = view === 'dashboard';
   const hasAdmin = isAdminUser(user);
 
@@ -35,7 +37,9 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <button className="link-btn" onClick={onLogout}>{t('common.logout')}</button>
       </header>
 
-      {showDashboard && <ErrorBoundary resetKey="dashboard"><Dashboard user={user} onUserUpdate={setUser} /></ErrorBoundary>}
+      <div style={{ display: showDashboard ? undefined : 'none' }}>
+        <ErrorBoundary resetKey="dashboard"><Dashboard user={user} onUserUpdate={setUser} /></ErrorBoundary>
+      </div>
 
       <div style={{ display: view === 'trips' ? undefined : 'none' }}>
         <ErrorBoundary resetKey="trips"><Trips /></ErrorBoundary>

@@ -333,7 +333,15 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       },
       priceModel: 'distance_time',
       paymentMethod,
-      scheduledAt: when === 'later' ? scheduleAt : null,
+      // datetime-local gives a naive local wall-clock string ("2026-10-07T14:00").
+      // The scheduler runs on UTC, so pin it to an exact instant (with the
+      // browser's timezone) before sending — otherwise SAST rides release 2h late.
+      scheduledAt: when === 'later' && scheduleAt
+        ? (() => {
+            const d = new Date(scheduleAt);
+            return Number.isNaN(d.getTime()) ? null : d.toISOString();
+          })()
+        : null,
       promoCode: promoApplied?.code || null,
     };
     api('/customer/trips', { method: 'POST', body: payload })

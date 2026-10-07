@@ -56,17 +56,27 @@ function attachRequestLogger(req, res, next) {
   next();
 }
 
+// 4xx errors (bad client input, stale polls, lockouts) are routine and would
+// otherwise drown the error log in noise; they stay visible at warn level in
+// dev and are captured for the audit trail by the request logger. 5xx errors
+// (or unknown) go to the error log with a stack trace.
 function logError(err, req) {
+  const status = (err && err.status) || 500;
   const entry = {
     ts: new Date().toISOString(),
+    status,
     name: (err && err.name) || 'Error',
     message: (err && err.message) || String(err),
     stack: config.nodeEnv === 'production' ? undefined : (err && err.stack),
     method: req && req.method,
     path: req && (req.originalUrl || req.url),
   };
-  write('error', entry);
-  console.error('[error]', entry.message);
+  if (status >= 500) {
+    write('error', entry);
+    console.error('[error]', entry.message);
+  } else if (config.nodeEnv === 'development') {
+    console.warn(`[warn] ${status} ${req && req.method} ${req && (req.originalUrl || req.url)} — ${entry.message}`);
+  }
 }
 
 module.exports = { attachRequestLogger, logError };

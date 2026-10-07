@@ -99,15 +99,15 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
       {upcoming.length > 0 && (
         <div className="card upcoming-card">
           <h3>🗓️ Upcoming scheduled ride</h3>
-          {upcoming.map((t) => (
-            <div key={t.id}>
-              <span className="upcoming-time">🕐 {formatScheduled(t.scheduledAt)}</span>
+          {upcoming.map((trip) => (
+            <div key={trip.id}>
+              <span className="upcoming-time">🕐 {formatScheduled(trip.scheduledAt)}</span>
               <p className="hint" style={{ margin: '4px 0' }}>
-                {t.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {t.destination?.address || 'Destination'}
+                {trip.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {trip.destination?.address || 'Destination'}
               </p>
               <div className="btn-row">
-                <button className="btn small" onClick={() => onRebook(t)}>View details</button>
-                <button className="btn small" onClick={() => cancelScheduled(t)}>Cancel ride</button>
+                <button className="btn small" onClick={() => onRebook(trip)}>View details</button>
+                <button className="btn small" onClick={() => cancelScheduled(trip)}>Cancel ride</button>
               </div>
             </div>
           ))}

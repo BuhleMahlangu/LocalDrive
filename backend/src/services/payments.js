@@ -137,9 +137,15 @@ async function confirmPayment({ tripId, customerId } = {}) {
   return { paid: true, trip: repo.getTripById(tripId), payment: markPaid(tripId, pay, checkout) };
 }
 
-// Quick check used for frontend polling / initial load.
+// Quick check used for frontend polling / initial load. Read-only, so a trip
+// that vanished (cancelled, test DB reset) or belongs to someone else is not a
+// failure: the poll simply reports "nothing to pay". The write endpoints
+// (checkout/confirm/refund) still 404 strictly on unknown trips.
 function getStatus({ tripId, customerId }) {
-  const trip = payableTrip(tripId, customerId);
+  const trip = repo.getTripById(tripId);
+  if (!trip || (customerId && trip.customerId !== customerId)) {
+    return { trip: null, payment: null, paid: false };
+  }
   const pay = repo.getPaymentByTrip(tripId);
   return { trip, payment: pay, paid: !!(pay && pay.status === 'succeeded') };
 }
@@ -269,9 +275,10 @@ function resolveTripId(payload, event) {
 
 // Authoritative payment confirmation. Treated as duplicate-safe: it only flips a
 // pending payment to succeeded once, after double-checking the charge with Yoco.
+// A refunded payment is never resurrected by a late success event.
 async function confirmByWebhook(tripId) {
   const pay = repo.getPaymentByTrip(tripId);
-  if (!pay || pay.status === 'succeeded') return;
+  if (!pay || pay.status === 'succeeded' || pay.status === 'refunded') return;
   const checkout = pay.paymentIntentId
     ? await yocoFetch(`/checkouts/${encodeURIComponent(pay.paymentIntentId)}`).catch(() => null)
     : null;
@@ -304,7 +311,12 @@ async function handleWebhook(req, notify) {
     return { received: true, tripId };
   }
   if (type === 'payment.failed') {
-    repo.markPaymentFailed(tripId);
+    // A duplicate/late failure event must not regress a payment that already
+    // succeeded or was refunded (out-of-order webhooks happen in practice).
+    const current = repo.getPaymentByTrip(tripId);
+    if (current && current.status !== 'succeeded' && current.status !== 'refunded') {
+      repo.markPaymentFailed(tripId);
+    }
     const trip = repo.getTripById(tripId);
     if (trip && notify) notify.paymentUpdated(repo.getPaymentByTrip(tripId), trip);
     return { received: true, tripId };
@@ -316,8 +328,14 @@ async function handleWebhook(req, notify) {
   }
   if (type === 'refund.failed') {
     // Refund was declined downstream — the original charge is still valid.
+    // Only restore a charge that was wrongly marked down; a genuinely refunded
+    // payment stays refunded.
+    const current = repo.getPaymentByTrip(tripId);
+    if (current && (current.status === 'failed' || current.status === 'pending')) {
+      repo.setPaymentStatus(tripId, 'succeeded');
+    }
     const trip = repo.getTripById(tripId);
-    if (trip && notify) notify.paymentUpdated(repo.setPaymentStatus(tripId, 'succeeded'), trip);
+    if (trip && notify) notify.paymentUpdated(repo.getPaymentByTrip(tripId), trip);
     return { received: true, tripId };
   }
   return { received: true };

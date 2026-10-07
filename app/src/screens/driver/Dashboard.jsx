@@ -240,7 +240,9 @@ export default function Dashboard({ user, onUserUpdate }) {
 
     if (active?.status === 'accepted') {
       doFetch();
-      fetchTimer.current = setInterval(doFetch, 15000);
+      fetchTimer.current = setInterval(() => {
+        if (document.visibilityState === 'visible' && navigator.onLine) doFetch();
+      }, 15000);
       return () => {
         clearInterval(fetchTimer.current);
         fetchTimer.current = null;
@@ -261,8 +263,14 @@ export default function Dashboard({ user, onUserUpdate }) {
 
   // Poll for state changes
   useEffect(() => {
+    // Skip while the tab is hidden or the phone lost its signal (prepaid data
+    // is precious on rural coverage); the socket keeps the driver online, and
+    // the next visible/online render resumes the poll.
+    const shouldPoll = () => document.visibilityState === 'visible' && navigator.onLine;
     refresh();
-    const poll = setInterval(refresh, 5000);
+    const poll = setInterval(() => {
+      if (shouldPoll()) refresh();
+    }, 5000);
     return () => clearInterval(poll);
   }, [refresh]);
 

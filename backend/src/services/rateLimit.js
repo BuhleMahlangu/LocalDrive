@@ -23,6 +23,7 @@ const OTP_MAX_PER_DAY = isProd ? MAX_PER_DAY : 10000;
 
 const buckets = new Map();
 const verifyBuckets = new Map();
+const ipBuckets = new Map();
 
 function prune() {
   if (buckets.size <= 5000) return;
@@ -30,6 +31,25 @@ function prune() {
   for (const [key, rec] of buckets) {
     if (rec.day !== today) buckets.delete(key);
   }
+}
+
+// IPv6 / behind a proxy "IP" strings are fine as opaque keys.
+function checkOtpIpLimit(ip) {
+  if (!ip || isProd === false) return { ok: true };
+  const nowMs = Date.now();
+  let rec = ipBuckets.get(ip);
+  if (!rec || !rec.timestamps || rec.timestamps.length === 0 || nowMs - rec.timestamps[rec.timestamps.length - 1] > 60 * 60 * 1000) {
+    rec = { timestamps: [] };
+    ipBuckets.set(ip, rec);
+  }
+  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
+  if (rec.timestamps.length >= 12) {
+    const oldest = rec.timestamps[0];
+    const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
+    return { ok: false, code: 'IP_TOO_FREQUENT', retryAfterSec };
+  }
+  rec.timestamps.push(nowMs);
+  return { ok: true };
 }
 
 function checkOtpLimit(phone) {
@@ -74,4 +94,4 @@ function checkVerifyLimit(phone) {
   return { ok: true };
 }
 
-module.exports = { checkOtpLimit, checkVerifyLimit, limits: { otpPerWindow: OTP_MAX_PER_WINDOW, otpPerDay: OTP_MAX_PER_DAY, verifyPerWindow: MAX_VERIFY_PER_WINDOW } };
+module.exports = { checkOtpLimit, checkVerifyLimit, checkOtpIpLimit, limits: { otpPerWindow: OTP_MAX_PER_WINDOW, otpPerDay: OTP_MAX_PER_DAY, verifyPerWindow: MAX_VERIFY_PER_WINDOW } };

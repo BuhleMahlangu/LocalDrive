@@ -125,6 +125,19 @@ async function getRoute({ pickup, destination }) {
   return result;
 }
 
+// Normalise a scheduled-at value to a UTC ISO instant. Browsers send a
+// wall-clock datetime-local string ("2026-10-07T14:00", no timezone); the
+// scheduler compares stored values against `new Date().toISOString()` (UTC),
+// so storing the naive local string made rides release ~2h late in SA. The
+// client already sends a timezoned ISO where possible; this parses whatever
+// arrives and pins it to an exact UTC instant. Returns null for anything that
+// can't be parsed so a bad value can never silently schedule in the past.
+function toUtcIso(value) {
+  if (value == null || value === '') return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null }) {
   // `getDriver()` is the platform rate card (representative pricing + booking
   // preview). Actual dispatch goes to every online approved driver.
@@ -136,7 +149,8 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     throw err;
   }
 
-  const isScheduled = !!scheduledAt;
+  const scheduledUtc = toUtcIso(scheduledAt);
+  const isScheduled = !!scheduledUtc;
 
   // Any approved driver must be online to accept new *immediate* bookings.
   // Scheduled trips are queued for later, so we don't require a driver online now.
@@ -182,7 +196,7 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     id: uid('trip'),
     customerId,
     status: isScheduled ? 'scheduled' : 'requested',
-    scheduledAt: isScheduled ? scheduledAt : null,
+    scheduledAt: scheduledUtc,
     pickup,
     destination,
     routePolyline: route.polyline,
@@ -324,17 +338,22 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   }
 
   const driver = repo.getDriver();
+  // Guard rails for the driver-supplied "actual" distance/duration: the phone's
+  // GPS track is legitimately a little off the booking estimate, but an
+  // inflated figure would overcharge the customer (and inflate the payout), so
+  // clamp to a plausible envelope around the route the booking actually priced.
+  const { distanceKm, durationMin } = saneActuals(trip, actualDistanceKm, actualDurationMin);
   const fare = pricing.estimateFare({
     baseFare: driver.baseFare,
     perKmRate: driver.perKmRate,
     perMinRate: driver.perMinRate,
-    distanceKm: actualDistanceKm ?? trip.distanceKm,
-    durationMin: actualDurationMin ?? trip.durationMin,
+    distanceKm,
+    durationMin,
   });
   // Apply any promo code the customer booked with: the discount applies to the
   // fare (not the tip), then the tip is added on top.
   const discounted = pricing.applyPromoDiscount(fare.subtotal, trip.promoPercent, driver.baseFare);
-  const tip = pricing.round(Number(tipAmount ?? trip.tipAmount ?? 0));
+  const tip = Math.max(0, pricing.round(Number(tipAmount ?? trip.tipAmount ?? 0)));
   const total = pricing.round(discounted.total + tip);
 
   const updated = repo.updateTrip(tripId, {
@@ -342,8 +361,8 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
     completed_at: now(),
     final_fare: total,
     tip_amount: tip,
-    distance_km: actualDistanceKm ?? trip.distanceKm,
-    duration_min: actualDurationMin ?? trip.durationMin,
+    distance_km: distanceKm,
+    duration_min: durationMin,
   });
 
   // Create the payment record. Cash trips are settled now (money handed
@@ -367,9 +386,40 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   return { trip: updated, payment: repo.getPaymentByTrip(tripId) };
 }
 
-async function cancelTrip(tripId, actor, reason) {
+// Clamp driver-reported actuals against the route the booking was priced on.
+// Distances up to 3x the estimate + 3km and durations up to 5x + 20min are
+// treated as plausible detours; anything beyond is capped so a bad GPS frame or
+// a scripted client can't inflate the fare and payout.
+function saneActuals(trip, actualDistanceKm, actualDurationMin) {
+  const bookedDist = Number(trip.distanceKm) || 0;
+  const bookedDur = Number(trip.durationMin) || 0;
+  const dist = Number(actualDistanceKm);
+  const dur = Number(actualDurationMin);
+  const distanceKm = Number.isFinite(dist) && dist >= 0
+    ? Math.min(dist, bookedDist > 0 ? bookedDist * 3 + 3 : Infinity)
+    : (bookedDist > 0 ? bookedDist : 0);
+  const durationMin = Number.isFinite(dur) && dur >= 0
+    ? Math.min(dur, bookedDur > 0 ? bookedDur * 5 + 20 : Infinity)
+    : (bookedDur > 0 ? bookedDur : 0);
+  return { distanceKm: pricing.round(distanceKm), durationMin: pricing.round(durationMin) };
+}
+
+async function cancelTrip(tripId, actor, reason, actorId) {
   const trip = repo.getTripById(tripId);
   if (!trip) {
+    const err = new Error('Trip not found');
+    err.status = 404;
+    throw err;
+  }
+  // Ownership checks: a customer may only cancel their own booking, a driver
+  // only trips they're assigned to. Without this, any authenticated customer
+  // could cancel someone else's live ride by guessing a trip id (IDOR).
+  if (actor === 'customer' && trip.customerId !== actorId) {
+    const err = new Error('Trip not found');
+    err.status = 404;
+    throw err;
+  }
+  if (actor === 'driver' && trip.driverId !== actorId) {
     const err = new Error('Trip not found');
     err.status = 404;
     throw err;
@@ -409,17 +459,14 @@ async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
     repo.updateTrip(tripId, { feedback_tags: clean.join(',') });
   }
   if (tipAmount != null) {
-    const driver = repo.getDriver();
-    const fare = pricing.estimateFare({
-      baseFare: driver.baseFare,
-      perKmRate: driver.perKmRate,
-      perMinRate: driver.perMinRate,
-      distanceKm: trip.distanceKm,
-      durationMin: trip.durationMin,
-    });
-    const discounted = pricing.applyPromoDiscount(fare.subtotal, trip.promoPercent, driver.baseFare);
-    const tip = pricing.round(Number(tipAmount));
-    const total = pricing.round(discounted.total + tip);
+    // A tip adjusts the fare the customer already agreed to (final_fare) by
+    // the delta from any previously recorded tip — it must NOT be re-priced
+    // from today's rate card. Re-running estimateFare() here meant an admin
+    // rate edit retroactively repriced old trips and threw away the agreed
+    // fare. final_fare = agreed subtotal + current tip (idempotent on repeat).
+    const tip = Math.max(0, pricing.round(Number(tipAmount) || 0));
+    const agreed = Math.max(0, Number(trip.finalFare ?? trip.fareEstimate ?? 0) - Number(trip.tipAmount ?? 0));
+    const total = pricing.round(agreed + tip);
     repo.updateTrip(tripId, { tip_amount: tip, final_fare: total });
     // Keep the payment record in sync with the new total when the trip is
     // cash (card amounts are fixed at checkout time and can't be adjusted

@@ -71,6 +71,13 @@ export default function TripTracker({ tripId }) {
     const schedule = (ms) => {
       if (!live || stopped) return;
       timer = setTimeout(async () => {
+        // Pause while the tab is hidden or the phone lost its signal — a
+        // shared trip link left open in the background must not burn the
+        // customer's prepaid data. The chain keeps ticking, just slowly.
+        if (document.visibilityState !== 'visible' || !navigator.onLine) {
+          schedule(Math.min(60000, ms * 2));
+          return;
+        }
         const keepGoing = await poll();
         // A fatal 4xx must not reschedule itself, otherwise the tracker retries
         // a permanently broken link every tick forever.
