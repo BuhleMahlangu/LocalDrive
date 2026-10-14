@@ -60,12 +60,33 @@ async function api(method, path, body, token) {
   return { status: res.status, json: await res.json().catch(() => ({})) };
 }
 
+// Ride gates: drivers need an ID copy + selfie on file before they can go
+// online or accept, customers need the same before booking. Seed both so the
+// gates stay out of the way (gate behaviour lives in security.test.js).
+const TEST_SA_ID = '9001015800088';
+function seedDriverDocs(userId) {
+  repo.saveDriverApplication(userId, {
+    idNumber: TEST_SA_ID,
+    idCopyPath: `${userId}_idcopy.jpg`,
+    selfiePath: `${userId}_selfie.jpg`,
+    proofOfResidencePath: `${userId}_proof.jpg`,
+  });
+}
+function seedCustomerIdentity(userId) {
+  repo.saveCustomerIdentity(userId, {
+    idNumber: TEST_SA_ID,
+    idCopyPath: `${userId}_idcopy.jpg`,
+    selfiePath: `${userId}_selfie.jpg`,
+  });
+}
+
 async function login(phone, role, name, email) {
   await api('POST', '/api/auth/otp/request', { phone, role });
   const res = await api('POST', '/api/auth/otp/verify', {
     phone, code: '123456', role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
+  if (role === 'customer') seedCustomerIdentity(res.json.user.id);
   return { token: res.json.token, user: res.json.user };
 }
 
@@ -78,6 +99,7 @@ function ensureDriver() {
   if (!driver) {
     driver = repo.createUser({ phone: DRIVER_PHONE, name: 'Thabo', email: 'd@x.za', role: 'driver' });
   }
+  seedDriverDocs(driver.id);
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 

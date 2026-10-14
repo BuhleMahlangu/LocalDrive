@@ -24,7 +24,10 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
     setError('');
     setLoading(true);
     try {
-      await api('/auth/otp/request', { method: 'POST', body: { phone, role } });
+      const res = await api('/auth/otp/request', { method: 'POST', body: { phone, role, email: email.trim() || undefined } });
+      if (res && res.delivery === 'email') {
+        // Code delivered by email; no special UI change needed beyond the hint.
+      }
       setStep('code');
     } catch (err) {
       setError(err.message);
@@ -64,18 +67,22 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
       </div>
 
       {step === 'phone' ? (
-        <form className="card" onSubmit={requestCode}>
+        <form className="card animate-in" onSubmit={requestCode}>
           <h2>{isDriver ? t('login.titleDriver') : t('login.titleCustomer')}</h2>
           <label>
             {t('common.phone')}
             <input type="tel" inputMode="tel" placeholder={t('login.ph')} value={phone} onChange={handlePhone} required autoFocus />
           </label>
+          <label>
+            {t('login.email')} (optional — used to deliver the code by email)
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
+          </label>
           {error && <p className="error">{error}</p>}
-          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? t('login.sending') : t('login.requestCode')}</button>
+          <button className={`btn ${isDriver ? 'driver' : 'primary'} big`} disabled={loading}>{loading ? t('login.sending') : t('login.requestCode')}</button>
           <p className="hint">{t('login.devHint')}</p>
         </form>
       ) : (
-        <form className="card" onSubmit={verify}>
+        <form className="card animate-in" onSubmit={verify}>
           <h2>{t('login.enterCode')}</h2>
           <p className="hint">{t('login.codeSent', { phone })}</p>
           <label>
@@ -91,7 +98,7 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
           </label>
           {error && <p className="error">{error}</p>}
-          <button className={`btn ${isDriver ? 'driver' : 'primary'}`} disabled={loading}>{loading ? t('login.verifying') : t('login.verify')}</button>
+          <button className={`btn ${isDriver ? 'driver' : 'primary'} big`} disabled={loading}>{loading ? t('login.verifying') : t('login.verify')}</button>
           <button type="button" className="link-btn" onClick={() => setStep('phone')} disabled={loading}>{t('login.changePhone')}</button>
         </form>
       )}

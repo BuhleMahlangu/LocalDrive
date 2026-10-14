@@ -274,7 +274,7 @@ test('audit', async ({ browser }) => {
     await page.locator('form.card button.btn').click().catch(() => {});
 
     await login(page, { role: 'customer', phone: '+27731110000', name: 'Nomvula' });
-    await expect(page.locator('.topbar')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(1200);
     await audit(page, 'home', theme);
 
@@ -283,7 +283,7 @@ test('audit', async ({ browser }) => {
     await page.waitForTimeout(800);
     await audit(page, 'book', theme);
 
-    await page.locator('.nav-btn').nth(2).click();
+    await page.locator('.nav-btn:visible').nth(2).click();
     await page.waitForTimeout(800);
     await audit(page, 'history', theme);
     await ctx.close();
@@ -296,7 +296,7 @@ test('audit', async ({ browser }) => {
     await ctx.addInitScript((t) => localStorage.setItem('drivelocal_theme', t), theme);
     const page = await ctx.newPage();
     await login(page, { role: 'driver', phone: DRIVER_PHONE, name: 'Sipho' });
-    await expect(page.locator('.dash-header')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
     const sw = page.locator('.switch input[type="checkbox"]');
     if (!(await sw.isChecked())) await page.locator('.switch .slider').click();
     await page.waitForTimeout(1500);

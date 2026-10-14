@@ -1,5 +1,47 @@
 const db = require('../db/connection');
 const config = require('../config');
+const crypto = require('crypto');
+
+// Best-effort encryption for at-rest protection of bank account numbers. When
+// BANK_DETAILS_KEY is unset we store plaintext (dev convenience) and the DB
+// remains readable; production deployments should set a strong random key.
+function bankKey() {
+  const secret = config.bankDetailsKey;
+  if (!secret) return null;
+  return crypto.scryptSync(String(secret), 'drivelocal-bank-details', 32);
+}
+
+function encryptBankAccountNumber(value) {
+  const key = bankKey();
+  if (!key) return String(value);
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(String(value), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `enc:${iv.toString('base64')}:${tag.toString('base64')}:${enc.toString('base64')}`;
+}
+
+function decryptBankAccountNumber(value) {
+  const v = String(value || '');
+  if (!v.startsWith('enc:')) return v;
+  const key = bankKey();
+  if (!key) return v;
+  const parts = v.split(':');
+  // enc:iv:tag:data
+  if (parts.length !== 4) return v;
+  try {
+    const iv = Buffer.from(parts[1], 'base64');
+    const tag = Buffer.from(parts[2], 'base64');
+    const data = Buffer.from(parts[3], 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    const dec = Buffer.concat([decipher.update(data), decipher.final()]);
+    return dec.toString('utf8');
+  } catch {
+    return '';
+  }
+}
+
 const { uid, now } = require('../utils/geo');
 const { round } = require('../services/pricing');
 
@@ -309,6 +351,55 @@ module.exports = {
     ).all().map((r) => this.mapApplication(r));
   },
 
+  // Identity completeness for a driver: both an ID copy and a selfie must be
+  // on file before they may go online or accept rides (safety gate).
+  hasDriverIdentity(driverId) {
+    const app = this.getDriverApplication(driverId);
+    return !!(app && app.idCopyUrl && app.selfieUrl);
+  },
+
+  // ---------- Customer identity documents ----------
+  mapCustomerIdentity(row) {
+    if (!row) {
+      return {
+        uploaded: false, idNumber: null, idCopyUrl: null, selfieUrl: null,
+        submittedAt: null, updatedAt: null,
+      };
+    }
+    return {
+      uploaded: !!(row.id_copy_path && row.selfie_path),
+      idNumber: row.id_number,
+      idCopyUrl: row.id_copy_path ? `/api/uploads/${row.id_copy_path}` : null,
+      selfieUrl: row.selfie_path ? `/api/uploads/${row.selfie_path}` : null,
+      submittedAt: row.submitted_at,
+      updatedAt: row.updated_at,
+    };
+  },
+
+  getCustomerIdentity(customerId) {
+    return this.mapCustomerIdentity(
+      db.prepare('SELECT * FROM customer_documents WHERE customer_id = ?').get(customerId),
+    );
+  },
+
+  // Booking gate: has this customer uploaded BOTH identity documents?
+  hasCustomerIdentity(customerId) {
+    return this.getCustomerIdentity(customerId).uploaded;
+  },
+
+  saveCustomerIdentity(customerId, { idNumber, idCopyPath, selfiePath }) {
+    db.prepare(
+      `INSERT INTO customer_documents (customer_id, id_number, id_copy_path, selfie_path, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(customer_id) DO UPDATE SET
+         id_number = excluded.id_number,
+         id_copy_path = COALESCE(excluded.id_copy_path, customer_documents.id_copy_path),
+         selfie_path = COALESCE(excluded.selfie_path, customer_documents.selfie_path),
+         updated_at = excluded.updated_at`,
+    ).run(customerId, idNumber, idCopyPath || null, selfiePath || null, now());
+    return this.getCustomerIdentity(customerId);
+  },
+
   // Build the full admin-facing driver record: account + application + wallet.
   listDriversForAdmin() {
     const rows = db.prepare(
@@ -356,6 +447,120 @@ module.exports = {
     return row
       ? { availableCents: row.available_cents, owedCents: row.owed_cents, updatedAt: row.updated_at }
       : { availableCents: 0, owedCents: 0, updatedAt: null };
+  },
+
+  // ---------- Driver bank accounts / payouts ----------
+  getBankAccount(driverId) {
+    const row = db.prepare(
+      'SELECT account_holder, bank_name, account_number, account_type, branch_code, updated_at FROM driver_bank_accounts WHERE driver_id = ?',
+    ).get(driverId);
+    if (!row) return null;
+    const n = decryptBankAccountNumber(row.account_number);
+    return {
+      accountHolder: row.account_holder,
+      bankName: row.bank_name,
+      accountType: row.account_type,
+      branchCode: row.branch_code,
+      accountNumberMasked: n.length > 4 ? '••••' + n.slice(-4) : n,
+      hasAccount: true,
+      updatedAt: row.updated_at,
+    };
+  },
+
+  saveBankAccount(driverId, { accountHolder, bankName, accountNumber, accountType, branchCode }) {
+    db.prepare(
+      `INSERT INTO driver_bank_accounts (driver_id, account_holder, bank_name, account_number, account_type, branch_code, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(driver_id) DO UPDATE SET
+         account_holder = excluded.account_holder,
+         bank_name = excluded.bank_name,
+         account_number = excluded.account_number,
+         account_type = excluded.account_type,
+         branch_code = excluded.branch_code,
+         updated_at = datetime('now')`,
+    ).run(driverId, accountHolder, bankName, encryptBankAccountNumber(accountNumber), accountType || 'current', branchCode || null);
+    return this.getBankAccount(driverId);
+  },
+
+  hasBankAccount(driverId) {
+    return !!this.getBankAccount(driverId);
+  },
+
+  createPayoutRequest(driverId, { amountCents, note }) {
+    const id = uid('payout');
+    db.prepare(
+      'INSERT INTO payout_requests (id, driver_id, amount_cents, note) VALUES (?, ?, ?, ?)',
+    ).run(id, driverId, amountCents, note || null);
+    return this.getPayoutRequest(id);
+  },
+
+  getPayoutRequest(id) {
+    const row = db.prepare(
+      `SELECT p.*, u.name AS driver_name, u.phone AS driver_phone
+       FROM payout_requests p LEFT JOIN users u ON u.id = p.driver_id
+       WHERE p.id = ?`,
+    ).get(id);
+    if (!row) return null;
+    return {
+      id: row.id,
+      driverId: row.driver_id,
+      driverName: row.driver_name,
+      driverPhone: row.driver_phone,
+      amountCents: row.amount_cents,
+      status: row.status,
+      note: row.note,
+      createdAt: row.created_at,
+      reviewedAt: row.reviewed_at,
+      reviewedBy: row.reviewed_by,
+      reference: row.reference,
+      providerReference: row.provider_reference,
+      providerStatus: row.provider_status,
+      providerPaidAt: row.provider_paid_at,
+      reconciliationNote: row.reconciliation_note,
+    };
+  },
+
+  listPayoutRequestsForDriver(driverId) {
+    return db.prepare(
+      'SELECT id FROM payout_requests WHERE driver_id = ? ORDER BY created_at DESC',
+    ).all(driverId).map((r) => this.getPayoutRequest(r.id));
+  },
+
+  listPayoutRequests(status) {
+    const rows = status
+      ? db.prepare('SELECT id FROM payout_requests WHERE status = ? ORDER BY created_at DESC').all(status)
+      : db.prepare('SELECT id FROM payout_requests ORDER BY created_at DESC').all();
+    return rows.map((r) => this.getPayoutRequest(r.id));
+  },
+
+  setPayoutRequestStatus(id, status, { reviewedBy, reference } = {}) {
+    db.prepare(
+      `UPDATE payout_requests
+       SET status = ?, reviewed_at = datetime('now'), reviewed_by = COALESCE(?, reviewed_by), reference = COALESCE(?, reference)
+       WHERE id = ?`,
+    ).run(status, reviewedBy || null, reference || null, id);
+    return this.getPayoutRequest(id);
+  },
+
+  reconcilePayoutRequest(id, { reference, providerReference, providerStatus, reconciliationNote } = {}) {
+    db.prepare(
+      `UPDATE payout_requests
+       SET reference = COALESCE(?, reference),
+           provider_reference = COALESCE(?, provider_reference),
+           provider_status = COALESCE(?, provider_status),
+           provider_paid_at = CASE WHEN ? IS NOT NULL THEN datetime('now') ELSE provider_paid_at END,
+           reconciliation_note = COALESCE(?, reconciliation_note),
+           reviewed_at = datetime('now')
+       WHERE id = ?`,
+    ).run(
+      reference || null,
+      providerReference || null,
+      providerStatus || null,
+      providerStatus ? 1 : null,
+      reconciliationNote || null,
+      id,
+    );
+    return this.getPayoutRequest(id);
   },
 
   // Move given driver_id's wallet by deltas (cents, can be negative).
@@ -980,63 +1185,76 @@ module.exports = {
 
   // ---------- Driver analytics ----------
   getDriverAnalytics(driverId) {
-    const trips = db.prepare('SELECT * FROM trips WHERE driver_id = ? ORDER BY requested_at DESC').all(driverId);
     const now = new Date();
-
-    // Daily earnings for last 7 days
-    const dailyEarnings = [];
+    // Daily earnings for the last 7 days, grouped in SQL rather than scanning trips in Node.
+    const dailyMap = new Map();
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dayStr = d.toISOString().slice(0, 10);
-      const dayTrips = trips.filter((t) => t.status === 'completed' && (t.completed_at || '').startsWith(dayStr));
-      dailyEarnings.push({
+      dailyMap.set(dayStr, {
         date: dayStr,
         label: d.toLocaleDateString('en-ZA', { weekday: 'short' }),
-        count: dayTrips.length,
-        earnings: dayTrips.reduce((s, t) => s + (t.final_fare || 0), 0),
+        count: 0,
+        earnings: 0,
       });
     }
+    const firstDay = Array.from(dailyMap.keys())[0];
+    for (const r of db.prepare(
+      `SELECT substr(completed_at, 1, 10) AS day, COUNT(*) AS c, COALESCE(SUM(final_fare), 0) AS earnings
+       FROM trips
+       WHERE driver_id = ? AND status = 'completed'
+         AND substr(completed_at, 1, 10) >= ?
+       GROUP BY day`,
+    ).all(driverId, firstDay)) {
+      const e = dailyMap.get(r.day);
+      if (e) { e.count = r.c; e.earnings = r.earnings; }
+    }
+    const dailyEarnings = Array.from(dailyMap.values());
 
-    // Hourly distribution (which hours are busiest)
+    // Hourly distribution of requests.
     const hourlyCount = Array(24).fill(0);
-    trips.forEach((t) => {
-      if (t.requested_at) {
-        const h = new Date(t.requested_at).getHours();
-        hourlyCount[h] += 1;
-      }
-    });
-    const busiestHours = hourlyCount.map((count, h) => ({ hour: h, count })).sort((a, b) => b.count - a.count).slice(0, 5);
+    for (const r of db.prepare(
+      `SELECT CAST(strftime('%H', requested_at) AS INTEGER) AS h, COUNT(*) AS c
+       FROM trips WHERE driver_id = ? AND requested_at IS NOT NULL
+       GROUP BY h`,
+    ).all(driverId)) {
+      if (r.h >= 0 && r.h < 24) hourlyCount[r.h] = r.c;
+    }
+    const busiestHours = hourlyCount
+      .map((count, h) => ({ hour: h, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
 
-    // Acceptance rate
-    const requested = trips.filter((t) => ['requested', 'accepted', 'cancelled'].includes(t.status)).length;
-    const accepted = trips.filter((t) => t.status !== 'requested' && t.driver_id).length;
-    const acceptanceRate = requested ? Math.round((accepted / requested) * 100) : 100;
+    // Aggregate counts in SQL.
+    const counts = db.prepare(
+      `SELECT
+        SUM(CASE WHEN status IN ('requested','accepted','cancelled') THEN 1 ELSE 0 END) AS requested,
+        SUM(CASE WHEN status <> 'requested' AND driver_id IS NOT NULL THEN 1 ELSE 0 END) AS accepted,
+        SUM(CASE WHEN cancel_actor = 'driver' THEN 1 ELSE 0 END) AS cancelledByDriver,
+        SUM(CASE WHEN cancel_actor = 'customer' THEN 1 ELSE 0 END) AS cancelledByCustomer,
+        COUNT(*) AS totalTrips,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completedTrips
+       FROM trips WHERE driver_id = ?`,
+    ).get(driverId) || {};
 
-    // Cancellation stats
-    const cancelledByDriver = trips.filter((t) => t.cancel_actor === 'driver').length;
-    const cancelledByCustomer = trips.filter((t) => t.cancel_actor === 'customer').length;
+    const waitRow = db.prepare(
+      `SELECT AVG((julianday(accepted_at) - julianday(requested_at)) * 86400000.0) AS avgMs
+       FROM trips WHERE driver_id = ? AND requested_at IS NOT NULL AND accepted_at IS NOT NULL`,
+    ).get(driverId);
+    const avgWaitMin = waitRow && waitRow.avgMs ? Math.round(waitRow.avgMs / 60000) : 0;
 
-    // Average wait time (time from request to acceptance)
-    let totalWaitMs = 0;
-    let waitCount = 0;
-    trips.forEach((t) => {
-      if (t.requested_at && t.accepted_at) {
-        totalWaitMs += new Date(t.accepted_at) - new Date(t.requested_at);
-        waitCount += 1;
-      }
-    });
-    const avgWaitMin = waitCount ? Math.round(totalWaitMs / waitCount / 60000) : 0;
-
+    const requested = counts.requested || 0;
+    const accepted = counts.accepted || 0;
     return {
       dailyEarnings,
       busiestHours,
-      acceptanceRate,
-      cancelledByDriver,
-      cancelledByCustomer,
+      acceptanceRate: requested ? Math.round((accepted / requested) * 100) : 100,
+      cancelledByDriver: counts.cancelledByDriver || 0,
+      cancelledByCustomer: counts.cancelledByCustomer || 0,
       avgWaitMin,
-      totalTrips: trips.length,
-      completedTrips: trips.filter((t) => t.status === 'completed').length,
+      totalTrips: counts.totalTrips || 0,
+      completedTrips: counts.completedTrips || 0,
     };
   },
 };

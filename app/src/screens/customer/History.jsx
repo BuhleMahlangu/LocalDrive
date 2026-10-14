@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { api, formatRand } from '../../api.js';
 import Skeleton from '../../components/Skeleton.jsx';
+import EmptyState from '../../components/EmptyState.jsx';
 import { useI18n } from '../../i18n.jsx';
 
 export default function History({ onBack, onRebook }) {
@@ -30,7 +31,7 @@ export default function History({ onBack, onRebook }) {
           <Skeleton card lines={3} />
         </>
       ) : trips.length === 0 ? (
-        <p className="hint">{t('history.empty')}</p>
+        <EmptyState icon="Empty" title={t('history.empty')} message="Book your first ride to see your history." />
       ) : (
         trips.map((tr) => (
           <div key={tr.id} className="card trip-history">

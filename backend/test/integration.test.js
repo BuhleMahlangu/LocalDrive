@@ -61,6 +61,27 @@ async function api(method, path, body, token) {
   return { status: res.status, json };
 }
 
+// Ride gates: drivers need an ID copy + selfie on file before they can go
+// online or accept rides, customers need the same before booking. Fixture
+// users get both seeded so the gates stay out of the way of the flow under
+// test (the gates themselves are covered in security.test.js).
+const TEST_SA_ID = '9001015800088';
+function seedDriverDocs(userId) {
+  repo.saveDriverApplication(userId, {
+    idNumber: TEST_SA_ID,
+    idCopyPath: `${userId}_idcopy.jpg`,
+    selfiePath: `${userId}_selfie.jpg`,
+    proofOfResidencePath: `${userId}_proof.jpg`,
+  });
+}
+function seedCustomerIdentity(userId) {
+  repo.saveCustomerIdentity(userId, {
+    idNumber: TEST_SA_ID,
+    idCopyPath: `${userId}_idcopy.jpg`,
+    selfiePath: `${userId}_selfie.jpg`,
+  });
+}
+
 // Request an OTP, verify it with the dev/test convenience code, and return the
 // issued token. (Test env uses the fixed code '123456'; the DB only holds a hash.)
 async function login(phone, role, name, email) {
@@ -74,6 +95,7 @@ async function login(phone, role, name, email) {
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
   assert.equal(res.json.success, true);
+  if (role === 'customer') seedCustomerIdentity(res.json.user.id);
   return { token: res.json.token, user: res.json.user };
 }
 
@@ -89,6 +111,7 @@ function ensureDriver() {
   if (!driver) {
     driver = repo.createUser({ phone: DRIVER_PHONE, name: 'Thabo', email: 'd@x.za', role: 'driver' });
   }
+  seedDriverDocs(driver.id);
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 
@@ -344,6 +367,7 @@ test('multi-driver dispatch: every online driver gets the request, first claim w
   if (!driverB) {
     driverB = repo.createUser({ phone: '+27826661111', name: 'Sipho', email: 'sip@x.za', role: 'driver' });
   }
+  seedDriverDocs(driverB.id);
   const tokenB = signToken({ id: driverB.id, role: 'driver' });
   const customer = await login('+27730005555', 'customer', 'Zamo', 'zamo@x.za');
 
@@ -439,6 +463,7 @@ test('admin can suspend a driver (blocks driver routes) and unsuspend them', asy
   if (!driver) {
     driver = repo.createUser({ phone: '+27824442222', name: 'Lerato', email: 'ler@x.za', role: 'driver' });
   }
+  seedDriverDocs(driver.id);
   const token = signToken({ id: driver.id, role: 'driver' });
 
   // Approved driver reaches operational endpoints.

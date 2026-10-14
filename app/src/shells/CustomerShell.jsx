@@ -6,7 +6,8 @@ import History from '../screens/customer/History.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
-import Onboarding, { hasSeenOnboarding } from '../components/Onboarding.jsx';
+import Onboarding from '../components/Onboarding.jsx';
+import { hasSeenOnboarding } from '../lib/onboarding.js';
 import { LangToggle, useI18n } from '../i18n.jsx';
 import { isDriverUser, api } from '../api.js';
 
@@ -73,8 +74,42 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
   // mounted only when opened so its socket doesn't linger in the background.
   const showActive = view === 'active';
 
+  const navItems = (
+    <>
+      <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={goHome} aria-current={view === 'home' ? 'page' : undefined}>
+        <Icon name="home" className="nav-icon" /> Home
+      </button>
+      <button className={view === 'book' ? 'nav-btn active' : 'nav-btn'} onClick={() => { setActiveTrip(null); setView('book'); }} aria-current={view === 'book' ? 'page' : undefined}>
+        <Icon name="book" className="nav-icon" /> Book
+      </button>
+      <button className={view === 'history' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('history')} aria-current={view === 'history' ? 'page' : undefined}>
+        <Icon name="history" className="nav-icon" /> Trips
+      </button>
+    </>
+  );
+
   return (
     <div className="app">
+      {/* Desktop: fixed sidebar (≥900px) */}
+      <nav className="side-nav" aria-label="Main">
+        <span className="brand brand-logomark side-brand"><img src="/logo-horizontal.png" alt="DriveLocal" /></span>
+        <div className="side-items">{navItems}</div>
+        <div className="side-foot">
+          <span className="user-chip">{user.name || user.phone}</span>
+          {canBeDriver && (
+            <button className="chip-btn" onClick={() => onSwitchRole('driver')} title={t('common.driverMode')}>
+              <Icon name="swap" size={14} /> {t('common.driverMode')}
+            </button>
+          )}
+          <div className="side-toggles">
+            <ThemeToggle />
+            <LangToggle />
+          </div>
+          <button className="link-btn" onClick={onLogout}>{t('common.logout')}</button>
+        </div>
+      </nav>
+
+      {/* Mobile: gradient top bar (hidden ≥900px) */}
       <header className="topbar">
         <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /></span>
         <span className="user-chip">{user.name || user.phone}</span>
@@ -136,16 +171,9 @@ export default function CustomerShell({ user, onLogout, onSwitchRole }) {
         </div>
       )}
 
+      {/* Mobile: floating bottom nav (hidden ≥900px) */}
       <nav className="bottom-nav">
-        <button className={view === 'home' ? 'nav-btn active' : 'nav-btn'} onClick={goHome}>
-          <Icon name="home" className="nav-icon" /> Home
-        </button>
-        <button className={view === 'book' ? 'nav-btn active' : 'nav-btn'} onClick={() => { setActiveTrip(null); setView('book'); }}>
-          <Icon name="book" className="nav-icon" /> Book
-        </button>
-        <button className={view === 'history' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('history')}>
-          <Icon name="history" className="nav-icon" /> Trips
-        </button>
+        {navItems}
       </nav>
 
       {showOnboarding && (

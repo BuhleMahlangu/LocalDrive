@@ -1,4 +1,5 @@
 const express = require('express');
+const config = require('../config');
 const authService = require('../services/auth');
 const { authRequired } = require('../middleware');
 const { checkOtpIpLimit } = require('../services/rateLimit');
@@ -37,8 +38,26 @@ router.post('/otp/verify', async (req, res, next) => {
         .status(result.retryAfterSec ? 429 : 401)
         .json(result);
     }
+    if (result.success && result.token) {
+      // Carry the JWT in an HttpOnly, Secure-in-prod cookie so the frontend
+      // never needs to read it from JavaScript. Kept alongside the token in the
+      // response for backwards-compatible clients.
+      res.cookie('drivelocal_token', result.token, {
+        httpOnly: true,
+        secure: config.nodeEnv === 'production',
+        sameSite: config.nodeEnv === 'production' ? 'none' : 'lax',
+        path: '/',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+    }
     res.json(result);
   } catch (e) { next(e); }
+});
+
+// Clear the auth cookie (logout in cookie-based sessions).
+router.post('/logout', (_req, res) => {
+  res.clearCookie('drivelocal_token', { path: '/' });
+  res.json({ success: true });
 });
 
 // Return the authenticated user's profile (used on app reload).

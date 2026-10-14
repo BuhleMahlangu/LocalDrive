@@ -20,6 +20,11 @@ server.on('request', (req, res) => {
 server.listen(config.port, () => {
   console.log(`DriveLocal backend listening on http://localhost:${config.port}`);
   console.log(`Currency: ${config.currency.toUpperCase()} | DB driver: ${config.dbDriver}`);
+  const emailService = require('./services/email');
+  emailService.verify().then((ok) => {
+    if (ok) console.log('[email] SMTP transport verified and ready');
+    else console.warn('[email] SMTP not configured or verification failed — OTP will use the interim fixed code (123456) for now.');
+  }).catch((e) => console.warn('[email] verification error:', e.message));
 
   // Auto-activate scheduled trips whose scheduled_at time has passed.
   // Runs every 30s; moves them into the live request flow so a driver can accept.

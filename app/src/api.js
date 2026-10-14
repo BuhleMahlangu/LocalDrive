@@ -36,8 +36,10 @@ export function isAdminUser(user) {
   return !!user && user.role === 'admin';
 }
 
-export function setSession(token, user) {
-  localStorage.setItem(TOKEN_KEY, token);
+export function setSession(_token, user) {
+  // The token is delivered/stored in an HttpOnly cookie by the backend, so it
+  // is never held in JavaScript-accessible storage. Persist the profile for
+  // quick UI hydration; the server remains the source of truth (/auth/me).
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
@@ -58,6 +60,7 @@ export async function api(path, { method = 'GET', body, token, signal } = {}) {
     headers,
     body: body ? JSON.stringify(body) : undefined,
     signal,
+    credentials: 'include',
   });
   let json = {};
   try {
@@ -84,6 +87,7 @@ export async function apiUpload(path, formData) {
     method: 'POST',
     headers,
     body: formData,
+    credentials: 'include',
   });
   let json = {};
   try {
@@ -101,7 +105,13 @@ export async function apiUpload(path, formData) {
 }
 
 export function connectSocket() {
-  return io(API_BASE || undefined, { auth: { token: getToken() } });
+  // Prefer cookie-based auth; fall back to a stored token only for legacy
+  // sessions that haven't migrated yet.
+  const token = getToken();
+  return io(API_BASE || undefined, {
+    auth: token ? { token } : {},
+    withCredentials: true,
+  });
 }
 
 // Download a protected file (e.g. an uploaded driver document) using the auth
@@ -111,7 +121,7 @@ export async function apiDownload(url, { filename } = {}) {
   const headers = {};
   const t = getToken();
   if (t) headers.Authorization = `Bearer ${t}`;
-  const res = await fetch(`${API_BASE}${url}`, { headers });
+  const res = await fetch(`${API_BASE}${url}`, { headers, credentials: 'include' });
   if (!res.ok) {
     const err = new Error(`Download failed (${res.status})`);
     err.status = res.status;
@@ -148,7 +158,7 @@ export function applyTheme() {
 function applyThemeValue(v) {
   document.documentElement.setAttribute('data-theme', v);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', v === 'dark' ? '#0f1420' : '#1a1a2e');
+  if (meta) meta.setAttribute('content', v === 'dark' ? '#0b1220' : '#f6f8fc');
   localStorage.setItem(THEME_KEY, v);
 }
 

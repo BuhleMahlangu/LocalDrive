@@ -72,28 +72,30 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
 
   return (
     <div className="screen">
-      <div className="card book-hero">
+      <div className="card book-hero animate-in">
         <h1>Hello{user.name ? `, ${user.name.split(' ')[0]}` : ''} 👋</h1>
         <p className="subtitle">Where are we headed today?</p>
         <button className="btn primary big" onClick={onBook}>
           <Icon name="book" size={21} /> {t('home.book')}
         </button>
-        <p className="hint" style={{ margin: '10px 0 0' }}>Live GPS · cash or card · no street names needed</p>
+        <p className="hint" style={{ margin: '10px 0 0' }}>Live GPS · Cash or card · No street names needed</p>
       </div>
 
       {active && (
-        <div className="card active-card">
-          <h3>{active.status === 'accepted' ? 'Driver on the way' : 'Trip in progress'}</h3>
-          <p className="hint" style={{ margin: '6px 0' }}>
-            {active.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {active.destination?.address || 'Destination'}
-          </p>
-          {driverLoc ? (
-            <p className="active-eta">🚗 Driver arriving in ~{etaMinutes(driverLoc, active.pickup)} min</p>
-          ) : (
-            <p className="hint">{active.status === 'accepted' ? 'Tracking driver…' : 'Heading to your destination'}</p>
-          )}
-          <button className="btn primary" onClick={() => onResume(active)}>Open trip</button>
-        </div>
+          <div className="card active-card animate-in">
+            <h3>{active.status === 'accepted' ? 'Driver on the way' : 'Trip in progress'}</h3>
+            <p className="hint" style={{ margin: '6px 0' }}>
+              {active.pickup?.address || t('book.pickupLabel').split(' — ')[0]} → {active.destination?.address || 'Destination'}
+            </p>
+            {driverLoc ? (
+              <div className="eta-row">
+                <span className="eta-chip">🚗 Driver arriving in ~{etaMinutes(driverLoc, active.pickup)} min</span>
+              </div>
+            ) : (
+              <p className="hint">{active.status === 'accepted' ? 'Tracking driver…' : 'Heading to your destination'}</p>
+            )}
+            <button className="btn primary big" onClick={() => onResume(active)}>Open trip</button>
+          </div>
       )}
 
       {upcoming.length > 0 && (
@@ -114,20 +116,20 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
         </div>
       )}
 
-      <div className="card">
-        <h3>{t('home.savedPlaces')}</h3>
-        {/* SavedPlacesBar fetches its own list and renders nothing until it
-            has data, so no page-level skeleton is needed here. */}
-        <SavedPlacesBar onPick={onPickPlace} active="destination" />
-        {!recentTrip && (
-          <p className="hint" style={{ margin: '8px 0 0' }}>{t('home.tapToBook')}</p>
-        )}
-      </div>
+        <div className="card animate-in">
+          <h3>{t('home.savedPlaces')}</h3>
+          {/* SavedPlacesBar fetches its own list and renders nothing until it
+              has data, so no page-level skeleton is needed here. */}
+          <SavedPlacesBar onPick={onPickPlace} active="destination" />
+          {!recentTrip && (
+            <p className="hint" style={{ margin: '8px 0 0' }}>{t('home.tapToBook')}</p>
+          )}
+        </div>
 
       {driverLoading ? (
         <Skeleton card avatar lines={3} />
       ) : driver ? (
-        <div className="card driver-card">
+        <div className="card driver-card animate-in">
           <div className="driver-row">
             <div className="avatar">{driver.photoUrl ? <img src={driver.photoUrl} alt="" /> : (driver.name || 'D')[0]}</div>
             <div>
@@ -154,7 +156,7 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
       {recentLoading ? (
         <Skeleton card lines={2} />
       ) : recentTrip && (
-        <div className="card">
+        <div className="card animate-in">
           <h3>{t('home.lastRide')}</h3>
           <p>{recentTrip.pickup.address} → {recentTrip.destination.address}</p>
           <p className="subtitle">{formatRand(recentTrip.finalFare ?? recentTrip.fareEstimate)}</p>
@@ -162,12 +164,12 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
         </div>
       )}
 
-      <a className="card support-card" href={toWhatsApp(supportPhone, 'Hi DriveLocal, I need help with a ride')} target="_blank" rel="noreferrer">
+      <a className="card support-card animate-in" href={toWhatsApp(supportPhone, 'Hi DriveLocal, I need help with a ride')} target="_blank" rel="noreferrer">
         <span>🛟 Need help? Call or WhatsApp your driver</span>
         <span className="chevron">›</span>
       </a>
 
-      <div className="card">
+      <div className="card animate-in">
         <NotificationsToggle />
       </div>
     </div>

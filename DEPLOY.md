@@ -10,7 +10,7 @@ The path below is the recommended **one-host** setup (frontend + API + WebSocket
 
 - A domain (e.g. `drivelocal.example.co.za`) pointing to your server's public IP.
 - A server with Node.js 18+ (we recommend Node 20/22 LTS). Ubuntu/Debian assumed below.
-- Real keys from: **ClickSend** (OTP SMS), **Yoco** (card payments — optional for launch), and VAPID keys for push (`npx web-push generate-vapid-keys`).
+- Real keys from: **Yoco** (card payments — optional for launch), and VAPID keys for push (`npx web-push generate-vapid-keys`). SMS OTP is **not integrated yet**: the verification code is the fixed interim value `123456` (see §13).
 
 ## 2. Directory layout
 
@@ -102,9 +102,9 @@ PORT=4000
 JWT_SECRET=<64+ random chars — the server refuses weak values in production>
 JWT_EXPIRES=30d
 DRIVER_PHONE=+27000000000        # the owner driver — gates driver login
-CLICKSEND_USERNAME=<your ClickSend account username>
-CLICKSEND_API_KEY=<from ClickSend dashboard > API keys>
-SMS_FROM=                         # optional alpha tag (WASPA-registered) or leave blank
+# SMS OTP: no provider configured yet. The code is the fixed interim value
+# 123456 in every environment (logged to the server console). Integrate a
+# provider after deploying (TODO in backend/src/services/sms.js).
 CORS_ORIGINS=https://drivelocal.example.co.za
 DB_DRIVER=sqlite
 GOOGLE_MAPS_API_KEY=             # optional, enables real roads/ETA
@@ -119,7 +119,7 @@ YOCO_SUCCESS_URL=https://drivelocal.example.co.za/?payment=success
 YOCO_CANCEL_URL=https://drivelocal.example.co.za/?payment=cancelled
 ```
 
-> The server **will not start** in production without JWT + ClickSend credentials + DRIVER_PHONE. That's deliberate.
+> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It also logs a loud warning that the OTP is still the fixed `123456` until a provider is integrated.
 
 ## 8. Enabling card payments (Yoco)
 
@@ -149,7 +149,7 @@ npm run backup    # confirm a snapshot is written
 Run through this on the live URL before telling anyone:
 
 - [ ] **HTTPS works and the PWA installs** (browser "Add to Home screen" / install prompt).
-- [ ] **SMS OTP arrives** — real ClickSend message in production (`123456` only in dev). Sign in as both customer and driver.
+- [ ] **Sign-in works with the interim code** — the verification code is `123456` for every number until an SMS/OTP provider is integrated. Sign in as both customer and driver.
 - [ ] **Location permission granted** — the #1 gotcha. On a phone it must be allowed for the domain (Settings → Privacy → Location); without it the customer can't pick up automatically and push needs HTTPS anyway.
 - [ ] **Book a trip end→end**: request → driver accepts → driver taps "I've arrived" → customer sees the arrived card → start trip → fare confirm → rating. Watch for live socket updates (no CORS / WS proxy errors in the browser console).
 - [ ] **Share link** `GET /api/public/trips/<id>/live` opens without logging in.
@@ -179,8 +179,10 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
   values are picked up by the backend scheduler, so no restart needed.
 - Web push only works on HTTPS with a service worker — the frontend build wires
   push handlers into the generated `sw.js` automatically.
-- Production OTP is a real ClickSend SMS under the surface (`123456` only in dev).
-  Keep `NODE_ENV=development` for local testing to avoid burning SMS credits.
+- **OTP is currently a fixed `123456` in every environment** (no SMS provider
+  integrated yet — ClickSend was removed before launch). Anyone who knows this
+  can sign in as any number, so integrate an OTP/SMS provider in
+  `backend/src/services/sms.js` before inviting real users.
 
 ## 14. Docker (alternative, optional)
 

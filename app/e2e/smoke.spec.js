@@ -1,9 +1,10 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
+import { uploadIdentity } from './identity.js';
 
 // Owner driver phone + service-area centre (mirrors config on the backend).
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
-const OTP = '123456'; // fixed dev code (backend must run with NODE_ENV=development)
+const OTP = '123456'; // fixed interim code (no SMS provider integrated yet)
 
 // One-browser-per-role smoke of the core loop: driver online -> customer books
 // -> driver accepts -> customer sees "Driver on the way".
@@ -15,7 +16,7 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   const driver = await driverCtx.newPage();
   await login(driver, { role: 'driver', phone: DRIVER_PHONE });
 
-  await expect(driver.locator('.dash-header')).toBeVisible();
+  await expect(driver.locator('.dash-header:visible, .side-nav:visible')).toBeVisible();
   // The switch input is a visually-hidden checkbox (opacity 0), so click the
   // visible slider inside its label — the same gesture a real user does. The
   // driver's real state may have been left online by a previous run, so only
@@ -37,6 +38,8 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   });
   const cust = await custCtx.newPage();
   await login(cust, { role: 'customer', phone: '+27123456789', name: 'Thandi' });
+  // Booking requires the identity documents on file (safety gate).
+  await uploadIdentity(cust);
 
   // The backend server may be reused across local runs (config reuses an
   // already-running server), so a previously accepted trip can still be "active".
@@ -57,7 +60,7 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
     } catch { /* ignore */ }
   });
 
-  await expect(cust.locator('.topbar')).toBeVisible();
+  await expect(cust.locator('.topbar:visible, .side-nav:visible')).toBeVisible();
   await cust.locator('.book-hero .btn.primary.big').click();
   await expect(cust.locator('.leaflet-container')).toBeVisible();
 
@@ -105,6 +108,67 @@ test('core booking loop: driver online + accept, customer books + sees ETA', asy
   await driverCtx.close();
 });
 
+// The identity gate has to be real in the UI too: a fresh customer gets the
+// verify panel instead of an unlockable booking button, and only an actual
+// upload lets a ride go through.
+test('a customer must verify identity through the booking screen', async ({ browser }) => {
+  // Own driver context so this test also passes when run with --grep alone.
+  const driverCtx = await browser.newContext();
+  const driver = await driverCtx.newPage();
+  await login(driver, { role: 'driver', phone: DRIVER_PHONE });
+  const onlineSwitch = driver.locator('.switch input[type="checkbox"]');
+  if (!(await onlineSwitch.isChecked())) {
+    await driver.locator('.switch .slider').click();
+    await expect(onlineSwitch).toBeChecked();
+  }
+
+  const ctx = await browser.newContext();
+  await ctx.addInitScript(() => {
+    localStorage.setItem('drivelocal_onboarded', '1');
+    localStorage.setItem('drivelocal_theme', 'light');
+  });
+  const page = await ctx.newPage();
+  // Fresh phone every run: the backend DB is persistent, so a reused customer
+  // would already be verified and the panel below would never appear.
+  const freshPhone = `+27${Date.now().toString().slice(-9)}`;
+  await login(page, { role: 'customer', phone: freshPhone, name: 'Naledi' });
+
+  await page.locator('.book-hero .btn.primary.big').click();
+  await expect(page.locator('.leaflet-container')).toBeVisible();
+
+  // A document-less customer is greeted by the verify panel before any pin.
+  await expect(page.locator('.verify-panel')).toBeVisible();
+  await page.locator('.verify-panel .btn.primary').click();
+
+  // Fill the form exactly like a real upload and submit it.
+  await page.locator('.verify-panel input[inputmode="numeric"]').fill('9001015800088');
+  const files = page.locator('.verify-panel input[type="file"]');
+  await files.nth(0).setInputFiles({ name: 'id.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([1, 2, 3]) });
+  await files.nth(1).setInputFiles({ name: 'selfie.jpg', mimeType: 'image/jpeg', buffer: Buffer.from([4, 5, 6]) });
+  await page.locator('.verify-panel button[type="submit"]').click();
+  await expect(page.locator('.verify-panel')).toBeHidden({ timeout: 10_000 });
+
+  // The gate is lifted: the regular booking flow now goes through.
+  const marker = page.locator('.leaflet-marker-icon.spot-icon').first();
+  await expect(marker).toBeVisible();
+  await marker.scrollIntoViewIfNeeded();
+  const spotBox = await marker.boundingBox();
+  await page.mouse.click(spotBox.x + spotBox.width / 2, spotBox.y + spotBox.height / 2);
+  await expect(page.locator('label.field input[readonly]').first()).not.toHaveValue('');
+
+  const map = page.locator('.leaflet-container');
+  const box = await map.boundingBox();
+  await map.click({ position: { x: box.width / 2, y: box.height / 2 + 30 } });
+  await expect(page.locator('.estimate-bar .estimate-amount')).toBeVisible();
+
+  await page.locator('.estimate-bar .btn.primary').click();
+  await page.locator('.modal-card .btn.primary.big').click();
+  await expect(page.locator('.book-header h1').filter({ visible: true })).toHaveText('Booking requested');
+
+  await ctx.close();
+  await driverCtx.close();
+});
+
 // The preset green dots are not pickup-only. With no pickup chosen yet the first
 // dot must set the pickup; once a pickup exists the same dots become valid
 // drop-offs.
@@ -117,7 +181,7 @@ test('a preset spot can be the drop-off, not just the pickup', async ({ browser 
   const page = await ctx.newPage();
   await login(page, { role: 'customer', phone: '+27123456801', name: 'Lerato' });
 
-  await expect(page.locator('.topbar')).toBeVisible();
+  await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible();
   await page.locator('.book-hero .btn.primary.big').click();
   await expect(page.locator('.leaflet-container')).toBeVisible();
 
@@ -202,8 +266,8 @@ async function login(page, { role, phone, name = 'Test User' }) {
   await page.locator('form.card button.btn').click();
 
   if (isDriver) {
-    await expect(page.locator('.dash-header')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
   } else {
-    await expect(page.locator('.topbar')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
   }
 }

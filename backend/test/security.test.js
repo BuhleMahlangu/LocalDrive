@@ -9,6 +9,7 @@
 //  5. Scheduled-at values are normalised to UTC so rides release on time.
 //  6. Payment records cannot regress: failed-after-succeeded and
 //     succeeded-after-refunded are no-ops.
+//  7. /estimate must 404 cleanly when no driver row exists (fresh DB), not 500.
 //
 // Same harness as routing.test.js: real Express app, in-memory SQLite, HTTP.
 
@@ -64,12 +65,24 @@ async function api(method, path, body, token) {
   return { status: res.status, json: await res.json().catch(() => ({})) };
 }
 
+// Ride gates: customers must upload an ID copy + selfie before booking. Fixture
+// customers get both seeded here (the no-docs path is tested explicitly below).
+const TEST_SA_ID = '9001015800088';
+function seedCustomerIdentity(userId) {
+  repo.saveCustomerIdentity(userId, {
+    idNumber: TEST_SA_ID,
+    idCopyPath: `${userId}_idcopy.jpg`,
+    selfiePath: `${userId}_selfie.jpg`,
+  });
+}
+
 async function login(phone, role, name, email) {
   await api('POST', '/api/auth/otp/request', { phone, role });
   const res = await api('POST', '/api/auth/otp/verify', {
     phone, code: '123456', role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
+  if (role === 'customer') seedCustomerIdentity(res.json.user.id);
   return { token: res.json.token, user: res.json.user };
 }
 
@@ -249,4 +262,133 @@ test('payment status can never regress from succeeded or refunded', async () => 
   repo.markPaymentSucceeded(trip2.id, { paymentIntentId: 'chk_1', driverPayoutCents: 900, platformFeeCents: 100 });
   assert.equal(repo.getPaymentByTrip(trip2.id).status, 'refunded',
     'a refunded payment stays refunded');
+});
+
+test('/estimate answers 404 when no driver rate card exists instead of 500', async () => {
+  // Simulates a fresh database (owner never logged in): routes that dereference
+  // the single driver row must fail cleanly. getRoute is skipped by the guard,
+  // so this stays fast and offline.
+  const original = repo.getDriver;
+  repo.getDriver = () => null;
+  try {
+    const res = await api('POST', '/api/customer/estimate', {
+      pickup: PICKUP, destination: DEST,
+    });
+    assert.equal(res.status, 404, 'clean 404, not a TypeError-driven 500');
+    assert.match(res.json.error, /driver/i);
+  } finally {
+    repo.getDriver = original;
+  }
+});
+
+// ---- Identity document gates (safety feature) ----
+
+async function postMultipart(path, fields, files, token) {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(fields)) form.append(key, value);
+  for (const [key, file] of Object.entries(files)) {
+    form.append(key, new Blob([file.bytes], { type: 'image/jpeg' }), file.name);
+  }
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+}
+
+test('a customer cannot book until they upload ID documents, and their documents stay private', async () => {
+  await goOnline();
+  const user = repo.createUser({ phone: '+27729000001', name: 'NoDocs Naledi', role: 'customer' });
+  const token = signToken({ id: user.id, role: 'customer' });
+
+  // The policy flag the booking screen keys its verify panel on.
+  const before = await api('GET', '/api/customer/identity', null, token);
+  assert.equal(before.status, 200);
+  assert.equal(before.json.uploaded, false);
+  assert.equal(before.json.required, true);
+
+  // Booking is refused with the machine-readable code.
+  const denied = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, token);
+  assert.equal(denied.status, 403);
+  assert.equal(denied.json.code, 'DOCUMENTS_REQUIRED');
+
+  // A non-SA ID number is rejected outright.
+  const badId = await postMultipart('/api/customer/identity', { idNumber: '123456' }, {
+    idCopy: { name: 'id.jpg', bytes: [1, 2, 3] },
+    selfie: { name: 'me.jpg', bytes: [4, 5, 6] },
+  }, token);
+  assert.equal(badId.status, 400);
+
+  // Both files at once, exactly like the booking screen sends them.
+  const uploaded = await postMultipart('/api/customer/identity', { idNumber: TEST_SA_ID }, {
+    idCopy: { name: 'id.jpg', bytes: [1, 2, 3] },
+    selfie: { name: 'me.jpg', bytes: [4, 5, 6] },
+  }, token);
+  assert.equal(uploaded.status, 201, 'both documents accepted');
+  assert.equal(uploaded.json.uploaded, true);
+  assert.equal(uploaded.json.required, false);
+
+  // Re-uploading (e.g. a clearer selfie) must not collide on the stored
+  // deterministic filename.
+  const again = await postMultipart('/api/customer/identity', { idNumber: TEST_SA_ID }, {
+    selfie: { name: 'me2.jpg', bytes: [7, 8, 9, 10] },
+  }, token);
+  assert.equal(again.status, 201, 're-upload with the same filenames works');
+  assert.equal(again.json.uploaded, true);
+
+  // With documents on file the booking goes through.
+  const booked = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, token);
+  assert.equal(booked.status, 201, 'verified customer can book');
+
+  // The admin owner previewing the customer app is exempt from the gate.
+  const owner = ensureDriver();
+  const adminBooked = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, owner.token);
+  assert.equal(adminBooked.status, 201, 'admin books without uploading anything');
+
+  // Stored documents are private: another signed-in customer gets a 403...
+  const filename = uploaded.json.idCopyUrl.split('/').pop();
+  const other = await login('+27729000002', 'customer', 'Mallory', 'm2@x.za');
+  const stranger = await api('GET', `/api/uploads/${filename}`, null, other.token);
+  assert.equal(stranger.status, 403, 'a stranger cannot read the ID copy');
+  // ...while the owner of the document can.
+  const mine = await api('GET', `/api/uploads/${filename}`, null, token);
+  assert.equal(mine.status, 200, 'the uploader can read their own document');
+});
+
+test('a driver without identity documents cannot go online or accept rides', async () => {
+  const fresh = repo.createUser({ phone: '+27729000003', name: 'NoDocs Sipho', role: 'driver' });
+  const token = signToken({ id: fresh.id, role: 'driver' });
+
+  // Going offline is always allowed so nobody gets stuck.
+  const off = await api('POST', '/api/driver/online', { isOnline: false }, token);
+  assert.equal(off.status, 200);
+
+  // Going online without an ID copy + selfie is refused...
+  const on = await api('POST', '/api/driver/online', { isOnline: true }, token);
+  assert.equal(on.status, 403);
+  assert.equal(on.json.code, 'DOCUMENTS_REQUIRED');
+  // ...and nothing was half-applied.
+  assert.equal(repo.getUserById(fresh.id).isOnline, false, 'the driver stays offline');
+
+  // The accept path is gated too, even for a driver already in the pool
+  // (e.g. online before this feature shipped).
+  await goOnline();
+  repo.setDriverOnline(fresh.id, true);
+  const customer = await login('+27729000004', 'customer', 'Thandi', 'thandi@x.za');
+  const booked = await api('POST', '/api/customer/trips', {
+    pickup: PICKUP, destination: DEST, paymentMethod: 'cash',
+  }, customer.token);
+  assert.equal(booked.status, 201);
+
+  const accept = await api('POST', `/api/driver/trips/${booked.json.trip.id}/accept`, {}, token);
+  assert.equal(accept.status, 403);
+  assert.equal(accept.json.code, 'DOCUMENTS_REQUIRED');
+  assert.equal(repo.getTripById(booked.json.trip.id).driverId, null, 'the trip is untouched');
 });

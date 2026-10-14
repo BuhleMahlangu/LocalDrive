@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api, apiDownload, formatRand } from '../../api.js';
 import Map from '../../components/Map.jsx';
+import EmptyState from '../../components/EmptyState.jsx';
 import decodePolyline from '../../lib/polyline.js';
 
 // Platform owner console. Four tabs:
@@ -19,9 +20,10 @@ export default function Admin() {
         <button className={`btn small ${tab === 'drivers' ? 'driver' : ''}`} onClick={() => setTab('drivers')}>Drivers</button>
         <button className={`btn small ${tab === 'records' ? 'driver' : ''}`} onClick={() => setTab('records')}>Records</button>
         <button className={`btn small ${tab === 'spots' ? 'driver' : ''}`} onClick={() => setTab('spots')}>Spots</button>
+        <button className={`btn small ${tab === 'payouts' ? 'driver' : ''}`} onClick={() => setTab('payouts')}>Payouts</button>
         <button className={`btn small ${tab === 'settings' ? 'driver' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
-      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : <SettingsTab />}
+      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -726,3 +728,80 @@ function fmt(iso) {
 }
 
 const configDefaultFee = 10;
+function PayoutsTab() {
+  const [status, setStatus] = useState('pending');
+  const [payouts, setPayouts] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  const load = () => {
+    setBusy(true);
+    setError('');
+    api(`/admin/payouts?status=${status}`)
+      .then((r) => setPayouts(r.payouts || []))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  useEffect(() => { load(); }, [status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (id, action, extra = {}) => {
+    setBusy(true);
+    try {
+      await api(`/admin/payouts/${id}/${action}`, { method: 'POST', body: extra });
+      setMessage(`Payout ${action}d`);
+      load();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const reconcile = async (payout) => {
+    const ref = window.prompt('Provider transaction reference');
+    if (ref === null) return;
+    const providerStatus = window.prompt('Provider status (processing/paid/failed)', 'paid') || 'paid';
+    setBusy(true);
+    try {
+      await api(`/admin/payouts/${payout.id}/reconcile`, { method: 'POST', body: { providerReference: ref, providerStatus } });
+      setMessage('Payout reconciled');
+      load();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card">
+      <h3>Driver payout requests</h3>
+      <div className="btn-row" style={{ marginBottom: '10px' }}>
+        {['pending', 'approved', 'paid', 'rejected', 'cancelled'].map((s) => (
+          <button key={s} className={`btn small ${status === s ? 'driver' : ''}`} onClick={() => setStatus(s)}>{s}</button>
+        ))}
+        <button className="btn small" onClick={load} disabled={busy}>Refresh</button>
+        <button className="btn small" onClick={() => apiDownload('/admin/payouts?format=csv', { filename: 'payouts.csv' })} disabled={busy}>Export CSV</button>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {message && <p className="success">{message}</p>}
+      {busy && <p className="hint">Loading�</p>}
+      {!busy && payouts.length === 0 && <EmptyState title="No payouts" message="Driver payout requests will appear here." />}
+      <ul className="list-compact">
+        {payouts.map((p) => (
+          <li key={p.id} style={{ marginBottom: '8px' }}>
+            <strong>{p.driverName || p.driverPhone}</strong> � {formatRand(p.amountCents / 100)} � {new Date(p.createdAt).toLocaleString()} � {p.status}
+            {p.note ? <span className="hint"> � {p.note}</span> : null}
+            <div className="btn-row" style={{ marginTop: '4px' }}>
+              {p.status === 'pending' && (
+                <>
+                  <button className="btn small primary" onClick={() => act(p.id, 'approve')}>Approve</button>
+                  <button className="btn small" onClick={() => act(p.id, 'reject', { reason: 'Rejected by admin' })}>Reject</button>
+                </>
+              )}
+              {(p.status === 'pending' || p.status === 'approved') && (
+                <button className="btn small primary" onClick={() => act(p.id, 'paid', { reference: 'Manual transfer' })}>Mark paid</button>
+              )}
+              <button className="btn small" onClick={() => reconcile(p)}>Reconcile</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

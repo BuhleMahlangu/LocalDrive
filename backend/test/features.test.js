@@ -13,6 +13,13 @@ const tripService = require('../src/services/trips');
 // Ensure a driver + customer exist for trip tests.
 const driver = repo.createUser({ phone: '+27830000001', name: 'Driver Thabo', role: 'driver' });
 repo.updateUserProfile(driver.id, { service_radius_km: 50, base_fare: 25, per_km_rate: 12, per_min_rate: 2.5 });
+// The accept/activate gate needs an ID copy + selfie on file (security.test.js).
+repo.saveDriverApplication(driver.id, {
+  idNumber: '9001015800088',
+  idCopyPath: `${driver.id}_idcopy.jpg`,
+  selfiePath: `${driver.id}_selfie.jpg`,
+  proofOfResidencePath: `${driver.id}_proof.jpg`,
+});
 repo.setDriverOnline(driver.id, true);
 repo.upsertDriverLocation(driver.id, { lat: -26.2155, lng: 29.2916, heading: 0, accuracy: 15 });
 const customer = repo.createUser({ phone: '+27830000002', name: 'Customer Naledi', role: 'customer' });

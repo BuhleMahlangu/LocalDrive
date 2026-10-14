@@ -7,10 +7,33 @@ function signToken(user) {
   return jwt.sign({ sub: user.id, role: user.role }, config.jwtSecret, { expiresIn: config.jwtExpires });
 }
 
+// Parse a Cookie header string into a name->value map (no extra dependency).
+function parseCookieHeader(cookieHeader) {
+  const out = {};
+  if (!cookieHeader) return out;
+  for (const part of String(cookieHeader).split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    const k = part.slice(0, eq).trim();
+    if (!k) continue;
+    let v = part.slice(eq + 1).trim();
+    try { v = decodeURIComponent(v); } catch { /* keep raw */ }
+    if (out[k] === undefined) out[k] = v;
+  }
+  return out;
+}
+
+// Prefer an explicit Bearer token, but fall back to the HttpOnly cookie issued
+// at verify-otp so tokens never have to live in client-side storage.
+function extractToken(req) {
+  const header = req.headers.authorization || '';
+  if (header.startsWith('Bearer ')) return header.slice(7);
+  return parseCookieHeader(req.headers.cookie).drivelocal_token || null;
+}
+
 function authRequired(roles) {
   return (req, res, next) => {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+    const token = extractToken(req);
     if (!token) return res.status(401).json({ error: 'Authentication required' });
     try {
       const payload = jwt.verify(token, config.jwtSecret);
@@ -38,8 +61,7 @@ function authRequired(roles) {
 // e.g. "which driver am I getting?" is the platform rate card for a browser, but
 // the driver actually assigned to a signed-in customer with a live trip.
 function optionalAuth(req, _res, next) {
-  const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = extractToken(req);
   if (!token) return next();
   try {
     const payload = jwt.verify(token, config.jwtSecret);
@@ -83,4 +105,4 @@ function errorHandler(err, req, res, _next) {
   });
 }
 
-module.exports = { authRequired, optionalAuth, signToken, approvedDriverOnly, adminOnly, notFound, errorHandler };
+module.exports = { authRequired, optionalAuth, signToken, approvedDriverOnly, adminOnly, notFound, errorHandler, parseCookieHeader, extractToken };

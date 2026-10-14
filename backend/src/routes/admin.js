@@ -38,9 +38,12 @@ router.post('/drivers/:id/approve', (req, res, next) => {
     if (driver.driverStatus === 'approved') {
       return res.json({ driver: repo.getUserById(driver.id) });
     }
-    // A driver may only be approved once they've submitted vetting documents.
+    // A driver may only be approved once they've submitted their identity
+    // documents — an ID copy and a selfie are required before they can ever
+    // go online (proof of residence is reviewed too but is not the identity
+    // pair the ride gate checks).
     const app = repo.getDriverApplication(driver.id);
-    const hasDocs = !!(app && (app.idCopyUrl || app.selfieUrl || app.proofOfResidenceUrl));
+    const hasDocs = !!(app && app.idCopyUrl && app.selfieUrl);
     if (!hasDocs) {
       return res.status(409).json({ error: 'Driver has not submitted their vetting documents yet' });
     }
@@ -154,6 +157,74 @@ router.delete('/spots/:id', (req, res, next) => {
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
+
+  // ---------- Payout requests (manual settlement) ----------
+  router.get('/payouts', (req, res) => {
+    const status = req.query.status ? String(req.query.status).trim() : null;
+    const payouts = repo.listPayoutRequests(status);
+    if (String(req.query.format || '').toLowerCase() === 'csv') {
+      const header = ['id', 'driver', 'amountCents', 'status', 'createdAt', 'reviewedAt', 'reviewedBy', 'reference', 'providerReference', 'providerStatus', 'note'];
+      const rows = payouts.map((p) => [
+        p.id, JSON.stringify(p.driverName || p.driverPhone || ''), p.amountCents, p.status,
+        p.createdAt, p.reviewedAt || '', p.reviewedBy || '', JSON.stringify(p.reference || ''),
+        JSON.stringify(p.providerReference || ''), JSON.stringify(p.providerStatus || ''), JSON.stringify(p.note || ''),
+      ].join(','));
+      const csv = [header.join(','), ...rows].join('\\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="payouts.csv"');
+      return res.send(csv);
+    }
+    res.json({ payouts });
+  });
+
+  router.post('/payouts/:id/reconcile', (req, res, next) => {
+    try {
+      const payout = repo.getPayoutRequest(req.params.id);
+      if (!payout) return res.status(404).json({ error: 'Payout not found' });
+      const updated = repo.reconcilePayoutRequest(req.params.id, {
+        reference: req.body?.reference,
+        providerReference: req.body?.providerReference,
+        providerStatus: req.body?.providerStatus,
+        reconciliationNote: req.body?.reconciliationNote,
+      });
+      res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
+  router.post('/payouts/:id/approve', (req, res, next) => {
+    try {
+      const payout = repo.getPayoutRequest(req.params.id);
+      if (!payout) return res.status(404).json({ error: 'Payout not found' });
+      if (payout.status !== 'pending') return res.status(400).json({ error: 'Only pending payouts can be approved' });
+      const updated = repo.setPayoutRequestStatus(req.params.id, 'approved', { reviewedBy: req.user.id });
+      res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
+
+  router.post('/payouts/:id/reject', (req, res, next) => {
+    try {
+      const payout = repo.getPayoutRequest(req.params.id);
+      if (!payout) return res.status(404).json({ error: 'Payout not found' });
+      if (payout.status !== 'pending' && payout.status !== 'approved') return res.status(400).json({ error: 'Payout cannot be rejected' });
+      const reason = req.body?.reason || null;
+      const updated = repo.setPayoutRequestStatus(req.params.id, 'rejected', { reviewedBy: req.user.id, reference: reason });
+      res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
+
+  router.post('/payouts/:id/paid', (req, res, next) => {
+    try {
+      const payout = repo.getPayoutRequest(req.params.id);
+      if (!payout) return res.status(404).json({ error: 'Payout not found' });
+      if (payout.status !== 'approved' && payout.status !== 'pending') return res.status(400).json({ error: 'Only approved/pending payouts can be marked paid' });
+      const reference = req.body?.reference || null;
+      const updated = repo.setPayoutRequestStatus(req.params.id, 'paid', { reviewedBy: req.user.id, reference });
+      // Debit the driver's wallet once the transfer is recorded as paid.
+      if (updated.status === 'paid') {
+        repo.adjustWallet(payout.driverId, { availableCents: -payout.amountCents });
+      }
+      res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
 
   return router;
 }

@@ -6,15 +6,7 @@ import { useI18n } from '../i18n.jsx';
 // pick how to pay. Auto-dismisses after a few seconds; stores "seen" in
 // localStorage so it shows at most once.
 
-const SEEN_KEY = 'drivelocal_onboarded';
-
-export function hasSeenOnboarding() {
-  try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return true; }
-}
-
-export function markOnboardingSeen() {
-  try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* ignore */ }
-}
+import { markOnboardingSeen } from '../lib/onboarding.js';
 
 export default function Onboarding({ onDone }) {
   const { t } = useI18n();

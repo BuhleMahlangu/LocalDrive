@@ -83,6 +83,30 @@ CREATE TABLE IF NOT EXISTS driver_wallets (
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS driver_bank_accounts (
+  driver_id      TEXT PRIMARY KEY,
+  account_holder TEXT NOT NULL,
+  bank_name      TEXT NOT NULL,
+  account_number TEXT NOT NULL,
+  account_type   TEXT NOT NULL DEFAULT 'current',
+  branch_code    TEXT,
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS payout_requests (
+  id            TEXT PRIMARY KEY,
+  driver_id     TEXT NOT NULL,
+  amount_cents  INTEGER NOT NULL,
+  status        TEXT NOT NULL DEFAULT 'pending',
+  note          TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  reviewed_at   TEXT,
+  reviewed_by   TEXT,
+  reference     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_driver ON payout_requests(driver_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON payout_requests(status);
+
 CREATE TABLE IF NOT EXISTS driver_locations (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   driver_id  TEXT NOT NULL,
@@ -272,6 +296,10 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   ensureColumn('payments', 'redirect_url', 'TEXT');
   ensureColumn('trips', 'promo_code', 'TEXT');
   ensureColumn('trips', 'promo_percent', "REAL NOT NULL DEFAULT 0");
+  ensureColumn('payout_requests', 'provider_reference', 'TEXT');
+  ensureColumn('payout_requests', 'provider_status', 'TEXT');
+  ensureColumn('payout_requests', 'provider_paid_at', 'TEXT');
+  ensureColumn('payout_requests', 'reconciliation_note', 'TEXT');
 
   // ---- Multi-driver platform migrations ----
   ensureColumn('users', 'driver_status', 'TEXT');
@@ -310,7 +338,49 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
     owed_cents      INTEGER NOT NULL DEFAULT 0,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE TABLE IF NOT EXISTS customer_documents (
+    customer_id    TEXT PRIMARY KEY,
+    id_number      TEXT NOT NULL,
+    id_copy_path   TEXT,
+    selfie_path    TEXT,
+    submitted_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS driver_bank_accounts (
+    driver_id      TEXT PRIMARY KEY,
+    account_holder TEXT NOT NULL,
+    bank_name      TEXT NOT NULL,
+    account_number TEXT NOT NULL,
+    account_type   TEXT NOT NULL DEFAULT 'current',
+    branch_code    TEXT,
+    updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS payout_requests (
+    id            TEXT PRIMARY KEY,
+    driver_id     TEXT NOT NULL,
+    amount_cents  INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'pending',
+    note          TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    reviewed_at   TEXT,
+    reviewed_by   TEXT,
+    reference     TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_payout_requests_driver ON payout_requests(driver_id, created_at DESC);
   `);
+
+  // Safety gate: a driver without an ID copy + selfie on file may not carry
+  // riders. Clear the persisted online flag of any such legacy driver so they
+  // drop out of the dispatch pool until they verify (the go-online and accept
+  // routes block them regardless).
+  sqliteDb.prepare(
+    `UPDATE users SET is_online = 0, updated_at = datetime('now')
+     WHERE role = 'driver' AND is_online = 1
+       AND id NOT IN (
+         SELECT driver_id FROM driver_documents
+         WHERE id_copy_path IS NOT NULL AND selfie_path IS NOT NULL
+       )`,
+  ).run();
 
   // Give every approved driver (and the admin owner) a wallet row.
   {

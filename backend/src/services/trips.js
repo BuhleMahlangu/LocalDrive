@@ -222,6 +222,8 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
 // (not when the ride is first booked) to avoid holding a slot on a ride that
 // may never happen.
 function activateScheduledTrip(tripId, driverId) {
+  // Identity gate: claiming a scheduled ride counts as taking a ride.
+  assertDriverIdentity(driverId);
   const trip = repo.activateScheduledTripClaim(tripId, driverId);
   if (trip && trip.promoCode) {
     const promo = repo.getPromoByCode(trip.promoCode);
@@ -268,6 +270,9 @@ function checkAvailabilityForPickup(pickup, scheduledAt) {
 }
 
 async function acceptTrip(tripId, driverId) {
+  // Identity gate: no rides until the driver has uploaded an ID copy + selfie.
+  // One choke point covers both the REST endpoint and the socket handler.
+  assertDriverIdentity(driverId);
   // Atomic first-wins claim: if another driver already accepted (or the
   // customer cancelled), claimTrip returns null and the loser gets a 409.
   const updated = repo.claimTrip(tripId, driverId);
@@ -277,6 +282,18 @@ async function acceptTrip(tripId, driverId) {
     throw err;
   }
   return updated;
+}
+
+// Shared identity gate for accept/activate: the admin owner is exempt, everyone
+// else needs an ID copy + selfie on file (driver_documents).
+function assertDriverIdentity(driverId) {
+  const driver = repo.getUserById(driverId);
+  if (driver && driver.role !== 'admin' && !repo.hasDriverIdentity(driverId)) {
+    const err = new Error('Upload your identification documents before taking rides');
+    err.status = 403;
+    err.code = 'DOCUMENTS_REQUIRED';
+    throw err;
+  }
 }
 
 async function declineTrip(tripId, _driverId, _reason) {

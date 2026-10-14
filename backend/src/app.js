@@ -23,6 +23,17 @@ const { attachRequestLogger } = require('./services/logger');
 function createApp({ notify }) {
   const app = express();
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
+  // Lightweight security headers (no extra dependency). Keep these conservative:
+  // they never inspect bodies or alter routing, so they can't break endpoints.
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    if (config.nodeEnv === 'production') {
+      res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    next();
+  });
   app.use(attachRequestLogger);
 
   // Yoco webhook needs the raw request body for signature verification.
@@ -33,6 +44,81 @@ function createApp({ notify }) {
     } catch (e) {
       res.status(e.status || 400).json({ error: e.message });
     }
+  });
+
+  // Payout status webhook (bank/provider callbacks). Kept raw so the HMAC
+  // signature over the original payload can be verified. Payload (JSON):
+  // { "payoutId" | "providerReference" | "reference", "status", "note" }.
+  const payoutRepo = require('./db/repository');
+  const crypto = require('crypto');
+  app.post('/api/payouts/webhook', express.raw({ type: 'application/json' }), (req, res) => {
+    const secret = config.payoutWebhookSecret;
+    if (secret) {
+      const sig = String(req.headers['x-payout-webhook-signature'] || req.headers['x-webhook-signature'] || '');
+      const digest = crypto.createHmac('sha256', secret).update(req.body || Buffer.from('')).digest('hex');
+      let ok = false;
+      try {
+        ok = sig.length === digest.length && crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(digest));
+      } catch { ok = false; }
+      if (!ok) return res.status(401).json({ error: 'Invalid webhook signature' });
+    } else if (config.nodeEnv === 'production') {
+      return res.status(503).json({ error: 'PAYOUT_WEBHOOK_SECRET not configured' });
+    } else {
+      console.warn('[payout-webhook] unsigned call accepted in non-production (secret unset)');
+    }
+
+    let event = {};
+    try { event = JSON.parse((req.body || Buffer.from('[]')).toString('utf8') || '{}'); }
+    catch { return res.status(400).json({ error: 'Invalid JSON body' }); }
+
+    const findByRef = (pr, ref) => {
+      if (!ref) return null;
+      try {
+        const row = payoutRepo.db.prepare(
+          'SELECT id FROM payout_requests WHERE provider_reference = ? OR reference = ? LIMIT 1',
+        ).get(String(ref), String(ref));
+        return row ? payoutRepo.getPayoutRequest(row.id) : null;
+      } catch { return null; }
+    };
+
+    let payout = null;
+    if (event.payoutId) payout = payoutRepo.getPayoutRequest(event.payoutId);
+    else if (event.providerReference || event.reference) {
+      payout = findByRef(null, event.providerReference || event.reference);
+    }
+
+    if (!payout) {
+      return res.json({ received: true, warning: 'payout not found', providerReference: event.providerReference || null });
+    }
+
+    const rawStatus = String(event.status || event.event || '').toLowerCase();
+    let newStatus = null;
+    if (rawStatus.includes('paid') || rawStatus.includes('completed') || rawStatus.includes('success')) newStatus = 'paid';
+    else if (rawStatus.includes('fail') || rawStatus.includes('reject')) newStatus = 'rejected';
+    else if (rawStatus.includes('process')) newStatus = 'approved';
+    else if (rawStatus) newStatus = null;
+
+    const before = payout.status;
+    payoutRepo.reconcilePayoutRequest(payout.id, {
+      reference: event.reference || null,
+      providerReference: event.providerReference || event.transactionId || null,
+      providerStatus: event.status || event.providerStatus || rawStatus || null,
+      reconciliationNote: event.note || event.message || null,
+    });
+
+    if (newStatus && newStatus !== before) {
+      // mark paid should debit wallet.
+      if (newStatus === 'paid') {
+        payoutRepo.setPayoutRequestStatus(payout.id, 'paid', { reviewedBy: 'webhook', reference: event.reference || null });
+        if (before !== 'paid') payoutRepo.adjustWallet(payout.driverId, { availableCents: -payout.amountCents });
+      } else if (newStatus === 'rejected') {
+        payoutRepo.setPayoutRequestStatus(payout.id, 'rejected', { reviewedBy: 'webhook', reference: event.reference || null });
+      } else if (newStatus === 'approved') {
+        payoutRepo.setPayoutRequestStatus(payout.id, 'approved', { reviewedBy: 'webhook', reference: event.reference || null });
+      }
+    }
+
+    return res.json({ received: true, payoutId: payout.id, status: newStatus || payout.status });
   });
 
   app.use(express.json());

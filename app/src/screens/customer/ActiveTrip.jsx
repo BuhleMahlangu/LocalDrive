@@ -102,11 +102,34 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
 
   useEffect(() => { tripIdRef.current = trip?.id ?? null; }, [trip?.id]);
 
-  // Payment status for the fare card — only relevant once the trip is complete.
+  // Payment status for the fare card. A card payment settles asynchronously:
+  // the hosted checkout returns to the app before the Yoco webhook lands, so a
+  // single fetch at completion can leave a stale "Pay by card" button. Poll
+  // briefly until the payment reaches a terminal state (or the window elapses).
   useEffect(() => {
-    if (trip?.id && trip.status === 'completed') {
-      api(`/payments/status?tripId=${trip.id}`).then((r) => r.payment && setPayment(r.payment)).catch(() => {});
+    if (!trip?.id || trip.status !== 'completed') return undefined;
+    let cancelled = false;
+    let timer = null;
+    let attempts = 0;
+    const MAX_CHECKS = 10;
+    const CHECK_MS = 3000;
+    const TERMINAL = ['succeeded', 'refunded', 'failed'];
+
+    async function check() {
+      try {
+        const r = await api(`/payments/status?tripId=${trip.id}`);
+        if (cancelled) return;
+        if (r.payment) setPayment(r.payment);
+        const settled = r.payment && TERMINAL.includes(r.payment.status);
+        if (settled || attempts >= MAX_CHECKS) return;
+      } catch {
+        if (cancelled || attempts >= MAX_CHECKS) return;
+      }
+      attempts += 1;
+      timer = setTimeout(check, CHECK_MS);
     }
+    check();
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [trip?.id, trip.status]);
 
   // Auto-hide transient toasts.

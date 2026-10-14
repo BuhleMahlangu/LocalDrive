@@ -16,7 +16,8 @@ always on. It uses the exact container layout from `docker-compose.yml` /
 
 ## Prereqs you already have
 
-- Your real `backend/.env` (ClickSend creds, VAPID keys, JWT secret, `DRIVER_PHONE`).
+- Your real `backend/.env` (VAPID keys, JWT secret, `DRIVER_PHONE`; no SMS/OTP
+  provider yet — the interim verification code is `123456`).
 - A **domain** pointing at the VM's public IP. This is *required*: web push +
   PWA install + geolocation all need HTTPS, and Caddy only issues Let's Encrypt
   certificates for real domains (it won't for a bare IP). You have two options:
@@ -111,7 +112,8 @@ sudo APP_DOMAIN=https://drivelocal.duckdns.org docker compose --profile proxy up
 https://drivelocal.duckdns.org/health        -> {"ok":true,...}
 ```
 
-- Sign in as the owner (`DRIVER_PHONE`) → real ClickSend OTP arrives.
+- Sign in as the owner (`DRIVER_PHONE`) → enter the interim code `123456`
+  (no SMS provider integrated yet).
 - Add to Home Screen as PWA; grant location + push on the HTTPS origin.
 - Book a ride end→end; watch `docker compose logs -f app` for socket events.
 - `docker compose ps` — `app` (healthy), `caddy`, and `backup` (writes snapshots

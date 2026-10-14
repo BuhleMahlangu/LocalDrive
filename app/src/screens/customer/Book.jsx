@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Map from '../../components/Map.jsx';
 import SavedPlacesBar, { SavePlaceBar } from '../../components/SavedPlaces.jsx';
-import { api, formatRand, toTel, toWhatsApp } from '../../api.js';
+import { api, apiUpload, formatRand, toTel, toWhatsApp, validateSaId } from '../../api.js';
 import geolocate from '../../lib/geolocate.js';
 import decodePolyline from '../../lib/polyline.js';
 import { nearestPoint } from '../../lib/geo.js';
@@ -78,6 +78,16 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
   const [promoCode, setPromoCode] = useState('');
   const [promoApplied, setPromoApplied] = useState(null);
   const [promoError, setPromoError] = useState('');
+  // Identity documents gate: booking is blocked until the customer uploads an
+  // ID copy + selfie. The server's `required` flag is the policy (admins pass).
+  const [identity, setIdentity] = useState(null);
+  const [showVerify, setShowVerify] = useState(false);
+  const [verifyIdNumber, setVerifyIdNumber] = useState('');
+  const [verifyIdCopy, setVerifyIdCopy] = useState(null);
+  const [verifySelfie, setVerifySelfie] = useState(null);
+  const [verifyError, setVerifyError] = useState('');
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const needsVerify = !!identity?.required;
 
   // For re-booking, show a hint that the destination is pre-set.
   const isRebook = !!presetDest && !!dest;
@@ -121,6 +131,15 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       .then((cfg) => setCardEnabled(!!cfg.enabled))
       .catch(() => setCardEnabled(false));
   }, []);
+
+  // Identity documents gate: (re)fetch whenever this screen is shown, not just
+  // on first mount — the shell keeps Book mounted in the background, so a
+  // verification done while it sat hidden must be picked up before the booking
+  // button renders (same for an admin clearing documents in the meantime).
+  useEffect(() => {
+    if (!visible) return;
+    api('/customer/identity').then(setIdentity).catch(() => {});
+  }, [visible]);
 
   // Fetch the driver's public details (vehicle, plate, phone) from the API
   // instead of using hardcoded values. Cache offline so the booking screen
@@ -310,8 +329,46 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
 
   function confirm() {
     if (!pickup || !dest) return;
+    // Safety gate: never open the review modal without documents on file.
+    if (needsVerify) { setShowVerify(true); return; }
     setModalError('');
     setShowConfirm(true);
+  }
+
+  function onVerifyFile(setter) {
+    return (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) setter(f);
+    };
+  }
+
+  // Upload the ID copy + selfie to unlock booking (multipart, like Apply.jsx).
+  async function submitVerify(e) {
+    e.preventDefault();
+    setVerifyError('');
+    if (!validateSaId(verifyIdNumber)) {
+      setVerifyError(t('book.verifyIdInvalid'));
+      return;
+    }
+    if (!verifyIdCopy || !verifySelfie) {
+      setVerifyError(t('book.verifyFilesRequired'));
+      return;
+    }
+    setVerifyBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('idNumber', verifyIdNumber.trim());
+      fd.append('idCopy', verifyIdCopy);
+      fd.append('selfie', verifySelfie);
+      const res = await apiUpload('/customer/identity', fd);
+      setIdentity(res);
+      setShowVerify(false);
+      setError('');
+    } catch (err) {
+      setVerifyError(err.message);
+    } finally {
+      setVerifyBusy(false);
+    }
   }
 
   // Actually send the request. Kept separate from confirm() so the summary modal
@@ -346,7 +403,18 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
     };
     api('/customer/trips', { method: 'POST', body: payload })
       .then((res) => { setShowConfirm(false); onRequest(res.trip); })
-      .catch((err) => setModalError(err.message))
+      .catch((err) => {
+        // The gate can flip under us — show the verify panel instead of a
+        // dead-end modal error.
+        if (err.code === 'DOCUMENTS_REQUIRED') {
+          setShowConfirm(false);
+          setShowVerify(true);
+          setError(err.message);
+          api('/customer/identity').then(setIdentity).catch(() => {});
+        } else {
+          setModalError(err.message);
+        }
+      })
       .finally(() => setLoading(false));
   }
 
@@ -375,7 +443,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
   const gpsPin = (p) => `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`;
 
   return (
-    <div className="screen">
+    <div className="screen book-screen">
       <div className="book-header">
         <button className="link-btn" onClick={onBack}>{t('common.back')}</button>
         <h1>{t('book.title')}</h1>
@@ -383,6 +451,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
 
       <div className="no-street-hint">{t('book.noStreets')}</div>
 
+      <div className="book-form">
       <div className="card">
         <label className="field">
           <span className="field-label">{t('book.pickupLabel')}</span>
@@ -523,6 +592,8 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
           📍 Nearest pickup: {nearest.spot.name || nearest.spot.address || 'Pickup spot'} · {fmtMeters(nearest.m)} — use this
         </button>
       )}
+      </div>
+
       <div className="map-wrap">
         {/* Pin flow: choose which pin the next tap places / re-adjusts. */}
         <div className="pin-mode">
@@ -572,6 +643,47 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
 
       <div className="estimate-bar">
         {error && <p className="error">{error}</p>}
+        {needsVerify && (
+          <div className="verify-panel">
+            {showVerify ? (
+              <form onSubmit={submitVerify}>
+                <h3>🛡 {t('book.verifyTitle')}</h3>
+                <p className="hint">{t('book.verifyHint')}</p>
+                <div className="field">
+                  <span className="field-label">{t('book.verifyIdNumber')}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={13}
+                    value={verifyIdNumber}
+                    onChange={(e) => setVerifyIdNumber(e.target.value)}
+                    placeholder="e.g. 9001015800088"
+                  />
+                </div>
+                <div className="field">
+                  <span className="field-label">{t('book.verifyIdCopy')}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={onVerifyFile(setVerifyIdCopy)} />
+                </div>
+                <div className="field">
+                  <span className="field-label">{t('book.verifySelfie')}</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onVerifyFile(setVerifySelfie)} />
+                  <p className="hint">{t('book.verifySelfieHint')}</p>
+                </div>
+                {verifyError && <p className="error">{verifyError}</p>}
+                <div className="btn-row" style={{ marginTop: '6px' }}>
+                  <button type="button" className="btn" onClick={() => { setShowVerify(false); setVerifyError(''); }} disabled={verifyBusy}>{t('common.back')}</button>
+                  <button type="submit" className="btn primary" disabled={verifyBusy}>{verifyBusy ? '…' : t('book.verifySubmit')}</button>
+                </div>
+              </form>
+            ) : (
+              <>
+                <h3>🛡 {t('book.verifyTitle')}</h3>
+                <p className="hint">{t('book.verifyHint')}</p>
+                <button type="button" className="btn primary" onClick={() => setShowVerify(true)}>{t('book.verifyCta')}</button>
+              </>
+            )}
+          </div>
+        )}
         {estimate ? (
           <div className="estimate-inner">
             <div>
@@ -634,7 +746,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
             />
             {savedMsg && <p className="success" style={{ margin: '6px 0 0' }}>Saved to your places ✨</p>}
 
-            <button className="btn primary" onClick={confirm} disabled={loading || !dest || (when === 'later' && !scheduleAt) || !estimate}>
+            <button className="btn primary" onClick={confirm} disabled={loading || needsVerify || !dest || (when === 'later' && !scheduleAt) || !estimate}>
               {loading ? '…' : when === 'later' ? t('book.scheduleRide') : t('book.review')}
             </button>
           </div>

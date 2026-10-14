@@ -4,6 +4,8 @@ const config = require('../config');
 const { authRequired, optionalAuth } = require('../middleware');
 const tripService = require('../services/trips');
 const push = require('../services/push');
+const uploadsService = require('../services/uploads');
+const { isValidSaId } = require('../services/saidNumber');
 
 // Factory takes socket notify helpers so REST can push realtime updates.
 function customerRoutes({ notify }) {
@@ -38,8 +40,12 @@ function customerRoutes({ notify }) {
   router.post('/estimate', async (req, res, next) => {
     try {
       const { pickup, destination, promoCode } = req.body;
-      const route = await tripService.getRoute({ pickup, destination });
+      // Fresh database (owner never logged in): the booking screen must get a
+      // clean 404, not a 500 from dereferencing a null rate card. Checked
+      // before the (potentially slow) route lookup so it fails fast.
       const driver = repo.getDriver();
+      if (!driver) return res.status(404).json({ error: 'No driver configured' });
+      const route = await tripService.getRoute({ pickup, destination });
       let estimate = require('../services/pricing').estimateFare({
         baseFare: driver.baseFare,
         perKmRate: driver.perKmRate,
@@ -68,6 +74,52 @@ function customerRoutes({ notify }) {
   });
 
   router.use(authRequired(['customer']));
+
+  // --- Identity documents (required before a ride can be booked) ---
+
+  // Current identity status. `required` is the policy flag the booking screen
+  // keys its verify panel on: everyone must upload (ID copy + selfie) before
+  // booking, except the admin owner previewing the customer app.
+  router.get('/identity', (req, res) => {
+    const identity = repo.getCustomerIdentity(req.user.id);
+    res.json({ ...identity, required: req.user.role !== 'admin' && !identity.uploaded });
+  });
+
+  // Upload (or re-upload) the documents: FormData with idNumber (text) plus
+  // idCopy and selfie (files). Re-submissions may omit an unchanged file — the
+  // stored path is kept (same COALESCE semantics as the driver application).
+  router.post(
+    '/identity',
+    uploadsService.upload.fields([
+      { name: 'idCopy', maxCount: 1 },
+      { name: 'selfie', maxCount: 1 },
+    ]),
+    (req, res, next) => {
+      try {
+        const { idNumber } = req.body || {};
+        if (!idNumber || !isValidSaId(idNumber)) {
+          return res.status(400).json({ error: 'A valid 13-digit SA ID number is required' });
+        }
+        const files = req.files || {};
+        const pick = (name) => (files[name] && files[name][0] ? files[name][0].filename : null);
+        const existing = repo.getCustomerIdentity(req.user.id);
+        const idCopyPath = pick('idCopy')
+          || (existing.idCopyUrl ? existing.idCopyUrl.split('/').pop() : null);
+        const selfiePath = pick('selfie')
+          || (existing.selfieUrl ? existing.selfieUrl.split('/').pop() : null);
+
+        const identity = repo.saveCustomerIdentity(req.user.id, {
+          idNumber: String(idNumber).trim(),
+          idCopyPath,
+          selfiePath,
+        });
+        if (!identity.uploaded) {
+          return res.status(400).json({ error: 'Both an ID copy and a selfie are required' });
+        }
+        res.status(201).json({ ...identity, required: false });
+      } catch (e) { next(e); }
+    },
+  );
 
   // Saved places (frequent home / work / other spots for quick booking).
   router.get('/places', (req, res) => {
@@ -104,6 +156,15 @@ function customerRoutes({ notify }) {
   // Create a booking (trip request).
   router.post('/trips', async (req, res, next) => {
     try {
+      // Safety gate: no ride until the customer has uploaded their
+      // identification documents (ID copy + selfie). The admin owner previewing
+      // the customer app is exempt.
+      if (req.user.role !== 'admin' && !repo.hasCustomerIdentity(req.user.id)) {
+        return res.status(403).json({
+          error: 'Please upload your identification documents before booking a ride',
+          code: 'DOCUMENTS_REQUIRED',
+        });
+      }
       const { pickup, destination, priceModel, paymentMethod, scheduledAt, promoCode } = req.body;
       if (paymentMethod !== 'cash' && paymentMethod !== 'card') {
         return res.status(400).json({ error: 'Invalid payment method' });

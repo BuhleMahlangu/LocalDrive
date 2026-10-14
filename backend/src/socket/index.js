@@ -2,6 +2,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
+const { parseCookieHeader } = require('../middleware');
 const push = require('../services/push');
 const tripService = require('../services/trips');
 
@@ -94,7 +95,10 @@ function initSocket(httpServer, corsOrigins) {
   }
 
   io.use((socket, next) => {
-    const token = socket.handshake.auth?.token;
+    let token = socket.handshake.auth?.token;
+    if (!token) {
+      token = parseCookieHeader(socket.handshake.headers?.cookie).drivelocal_token;
+    }
     if (!token) return next(new Error('Authentication required'));
     try {
       const payload = jwt.verify(token, config.jwtSecret);
@@ -135,10 +139,9 @@ function initSocket(httpServer, corsOrigins) {
       if (isSpoofed(id, lat, lng, accuracy)) return;
       repo.upsertDriverLocation(id, { lat, lng, heading, accuracy });
 
-      // Broadcast to any room listening for driver location.
-      io.emit('driver:location:update', { driverId: id, lat, lng, heading, accuracy });
-
-      // If this driver has an active trip, push live location to that customer.
+      // Only the customer on an active trip with this driver receives a live
+      // fix. (Previously broadcast globally, leaking driver position to all
+      // clients.) drop the stale global emit.
       const active = repo.getActiveTripsForDriver(id)[0];
       if (active) {
         io.to(`user:${active.customerId}`).emit('trip:location', {
@@ -154,9 +157,12 @@ function initSocket(httpServer, corsOrigins) {
       socket.emit('driver:location:init', { driverId, location: loc });
     });
 
-    // Driver goes online/offline.
+    // Driver goes online/offline. Going online requires identity documents
+    // on file (ID copy + selfie) — mirrors the REST /driver/online gate; the
+    // admin owner is exempt. Offline is always allowed.
     socket.on('driver:online', (isOnline) => {
       if (!isActiveDriver()) return;
+      if (isOnline && socket.user.role !== 'admin' && !repo.hasDriverIdentity(id)) return;
       repo.setDriverOnline(id, !!isOnline);
       io.emit('driver:status:update', { driverId: id, isOnline: !!isOnline });
       if (isOnline) clearOfflineTimer(id);

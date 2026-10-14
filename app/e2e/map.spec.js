@@ -1,5 +1,6 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
+import { uploadIdentity } from './identity.js';
 
 // Map regressions that only show up in a real browser: tiles actually painting,
 // and the live-tracking marker being *moved* rather than destroyed and rebuilt.
@@ -49,7 +50,7 @@ test('map tiles load and carry the required OpenStreetMap attribution', async ({
   await page.locator('input[inputmode="numeric"]').fill(OTP);
   await page.locator('input[placeholder="Thabo"]').fill('Map Tester');
   await page.locator('form.card button.btn').click();
-  await expect(page.locator('.topbar')).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
 
   await page.locator('.book-hero .btn.primary.big').click();
   const map = page.locator('.leaflet-container');
@@ -101,6 +102,8 @@ test('the driver marker is moved, not rebuilt, and the map follows it', async ({
   });
   const cust = await custCtx.newPage();
   await login(cust, { role: 'customer', phone: '+27720002222', name: 'Nomvula' });
+  // Booking requires the identity documents on file (safety gate).
+  await uploadIdentity(cust);
 
   // A locally reused backend can still be holding a trip from a previous run;
   // clear it or the booking below is rejected.
@@ -260,6 +263,6 @@ async function login(page, { role, phone, name = 'Test User' }) {
   await page.locator('input[inputmode="numeric"]').fill(OTP);
   await page.locator('input[placeholder="Thabo"]').fill(name);
   await page.locator('form.card button.btn').click();
-  if (isDriver) await expect(page.locator('.dash-header')).toBeVisible({ timeout: 20_000 });
-  else await expect(page.locator('.topbar')).toBeVisible({ timeout: 20_000 });
+  if (isDriver) await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
+  else await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
 }

@@ -28,7 +28,7 @@ test('production allows up to 3 requests per phone per 60s window', () => {
 });
 
 test('production enforces the daily cap', () => {
-  const { checkOtpLimit, limits } = loadRateLimit('production');
+  const { limits } = loadRateLimit('production');
   assert.equal(limits.otpPerDay, 10);
   assert.equal(limits.otpPerWindow, 3);
 });
@@ -55,6 +55,36 @@ test('outside production the request cap is relaxed so e2e logins do not throttl
   const { checkOtpLimit, limits } = loadRateLimit('test');
   assert.ok(limits.otpPerWindow > 3);
   for (let i = 0; i < 10; i += 1) {
-    assert.equal(checkOtpLimit('+27840000001').ok, true, `dev request ${i + 1} should pass`);
+    assert.equal(checkOtpLimit('+27840000001').ok, true, `dev request ${i + 1}`);
+  }
+});
+
+test('production caps OTP requests per IP, with a Retry-After hint', () => {
+  const { checkOtpIpLimit } = loadRateLimit('production');
+  const ip = '41.203.10.7';
+  for (let i = 0; i < 12; i += 1) {
+    assert.equal(checkOtpIpLimit(ip).ok, true, `request ${i + 1} from the IP`);
+  }
+  const blocked = checkOtpIpLimit(ip);
+  assert.equal(blocked.ok, false, 'the 13th request in the window is blocked');
+  assert.equal(blocked.code, 'IP_TOO_FREQUENT');
+  assert.ok(blocked.retryAfterSec > 0 && blocked.retryAfterSec <= 60,
+    `retryAfterSec must be a sane seconds value, got ${blocked.retryAfterSec}`);
+});
+
+test('the per-IP cap does not leak across IPs, and empty IPs are never throttled', () => {
+  const { checkOtpIpLimit } = loadRateLimit('production');
+  const ip = '105.184.0.9';
+  for (let i = 0; i < 13; i += 1) checkOtpIpLimit(ip);
+  assert.equal(checkOtpIpLimit(ip).ok, false, 'the noisy IP is blocked');
+  assert.equal(checkOtpIpLimit('105.184.0.10').ok, true, 'a different IP is unaffected');
+  assert.equal(checkOtpIpLimit('').ok, true, 'no IP (e.g. a broken peer address) never blocks OTP delivery');
+  assert.equal(checkOtpIpLimit(null).ok, true);
+});
+
+test('outside production the per-IP cap is off so dev/e2e logins never throttle', () => {
+  const { checkOtpIpLimit } = loadRateLimit('test');
+  for (let i = 0; i < 50; i += 1) {
+    assert.equal(checkOtpIpLimit('127.0.0.1').ok, true, `dev request ${i + 1}`);
   }
 });

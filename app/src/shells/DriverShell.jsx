@@ -24,8 +24,51 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
   const showDashboard = view === 'dashboard';
   const hasAdmin = isAdminUser(user);
 
+  const navItems = (
+    <>
+      <button className={view === 'dashboard' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('dashboard')} aria-current={view === 'dashboard' ? 'page' : undefined}>
+        <Icon name="home" className="nav-icon" /> {t('nav.home')}
+      </button>
+      <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')} aria-current={view === 'trips' ? 'page' : undefined}>
+        <Icon name="trips" className="nav-icon" /> {t('nav.trips')}
+      </button>
+      <button className={view === 'analytics' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('analytics')} aria-current={view === 'analytics' ? 'page' : undefined}>
+        <Icon name="chart" className="nav-icon" /> {t('nav.insights')}
+      </button>
+      <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')} aria-current={view === 'revenue' ? 'page' : undefined}>
+        <Icon name="coins" className="nav-icon" /> {t('nav.payouts')}
+      </button>
+      {hasAdmin && (
+        <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')} aria-current={view === 'admin' ? 'page' : undefined}>
+          <Icon name="gear" className="nav-icon" /> {t('nav.admin')}
+        </button>
+      )}
+      <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')} aria-current={view === 'profile' ? 'page' : undefined}>
+        <Icon name="profile" className="nav-icon" /> {t('nav.profile')}
+      </button>
+    </>
+  );
+
   return (
     <div className="app driver-app">
+      {/* Desktop: fixed sidebar (≥900px) */}
+      <nav className="side-nav" aria-label="Main">
+        <span className="brand brand-logomark side-brand"><img src="/logo-horizontal.png" alt="DriveLocal" /><em>{t('common.driver')}</em></span>
+        <div className="side-items">{navItems}</div>
+        <div className="side-foot">
+          <span className="user-chip">{user.name || user.phone}</span>
+          <button className="chip-btn" onClick={() => onSwitchRole('customer')} title={t('common.customerMode')}>
+            <Icon name="swap" size={14} /> {t('common.customerMode')}
+          </button>
+          <div className="side-toggles">
+            <ThemeToggle />
+            <LangToggle />
+          </div>
+          <button className="link-btn" onClick={onLogout}>{t('common.logout')}</button>
+        </div>
+      </nav>
+
+      {/* Mobile: gradient header (hidden ≥900px) */}
       <header className="dash-header">
         <span className="brand brand-logomark"><img src="/logo-horizontal.png" alt="DriveLocal" /><em>{t('common.driver')}</em></span>
         <span className="user-chip">{user.name || user.phone}</span>
@@ -61,27 +104,9 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
         <ErrorBoundary resetKey="admin"><Admin /></ErrorBoundary>
       </div>
 
+      {/* Mobile: floating bottom nav (hidden ≥900px) */}
       <nav className="bottom-nav">
-        <button className={view === 'dashboard' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('dashboard')}>
-          <Icon name="home" className="nav-icon" /> {t('nav.home')}
-        </button>
-        <button className={view === 'trips' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('trips')}>
-          <Icon name="trips" className="nav-icon" /> {t('nav.trips')}
-        </button>
-        <button className={view === 'analytics' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('analytics')}>
-          <Icon name="chart" className="nav-icon" /> {t('nav.insights')}
-        </button>
-        <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')}>
-          <Icon name="coins" className="nav-icon" /> {t('nav.payouts')}
-        </button>
-        {hasAdmin && (
-          <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')}>
-            <Icon name="gear" className="nav-icon" /> {t('nav.admin')}
-          </button>
-        )}
-        <button className={view === 'profile' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('profile')}>
-          <Icon name="profile" className="nav-icon" /> {t('nav.profile')}
-        </button>
+        {navItems}
       </nav>
     </div>
   );

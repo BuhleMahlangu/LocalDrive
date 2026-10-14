@@ -48,6 +48,17 @@ CREATE TABLE IF NOT EXISTS driver_wallets (
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Customer identity documents (one row per customer). Booking is blocked
+-- until both an ID copy and a selfie are on file — safety requirement.
+CREATE TABLE IF NOT EXISTS customer_documents (
+  customer_id    TEXT PRIMARY KEY REFERENCES users(id),
+  id_number      TEXT NOT NULL,
+  id_copy_path   TEXT,
+  selfie_path    TEXT,
+  submitted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Ephemeral driver location (last known, retained 60 min for history)
 CREATE TABLE IF NOT EXISTS driver_locations (
   id         SERIAL PRIMARY KEY,

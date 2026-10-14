@@ -3,8 +3,8 @@ const jwt = require('jsonwebtoken');
 const config = require('../config');
 const repo = require('../db/repository');
 const sms = require('./sms');
+const email = require('./email');
 const { checkOtpLimit, checkVerifyLimit } = require('./rateLimit');
-const { makeOtp } = require('../utils/geo');
 
 const OTP_TTL_MIN = 10;
 const MAX_ATTEMPTS = 5;
@@ -17,7 +17,7 @@ function hashOtp(phone, code) {
   return crypto.createHash('sha256').update(`${phone}:${String(code)}:${config.jwtSecret}`).digest('hex');
 }
 
-async function requestOtp({ phone, role: _role }) {
+async function requestOtp({ phone, role: _role, email: requestedEmail }) {
   if (!/^\+?\d{9,15}$/.test(phone)) {
     const err = new Error('Invalid phone number');
     err.status = 400;
@@ -25,8 +25,8 @@ async function requestOtp({ phone, role: _role }) {
   }
   const normalized = normalizePhone(phone);
 
-  // Throttle OTP requests per phone (window + daily cap). In production this
-  // caps real SMS cost and stops one phone from spamming another.
+  // Throttle OTP requests per phone (window + daily cap). This caps SMS cost
+  // once a provider is integrated and stops one phone from spamming another.
   const limit = checkOtpLimit(normalized);
   if (!limit.ok) {
     const err = new Error(
@@ -40,19 +40,34 @@ async function requestOtp({ phone, role: _role }) {
     throw err;
   }
 
-  // A fixed convenience code is only for development/test environments. Any
-  // other environment generates a random OTP, which is then delivered by
-  // `sms.send` and stored as a hash.
-  const code = config.nodeEnv === 'production' ? makeOtp() : '123456';
+  // Determine whether we can deliver a real one-time code by email (SMTP) or
+  // fall back to the fixed interim code. We never log the plaintext code in
+  // production once a real provider is wired in.
+  const existingUser = repo.getUserByPhone(normalized) || repo.getUserByPhone(normalized, _role === 'driver' ? 'driver' : 'customer');
+  const toEmail = String(requestedEmail || existingUser?.email || '').trim();
+
+  const smtpReady = email.isConfigured();
+  const canEmail = smtpReady && toEmail;
+  const code = canEmail ? String(crypto.randomInt(100000, 1000000)) : '123456';
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
   repo.saveOtp(normalized, hashOtp(normalized, code), expiresAt);
-  await sms.send({
-    to: normalized,
-    body: `DriveLocal: your verification code is ${code}. Valid for ${OTP_TTL_MIN} minutes.`,
-  });
 
-  return { phone: normalized, expiresInSeconds: OTP_TTL_MIN * 60, dev: config.nodeEnv !== 'production' };
+  if (canEmail) {
+    await email.send({
+      to: toEmail,
+      subject: 'Your DriveLocal verification code',
+      text: `Your DriveLocal verification code is ${code}. It is valid for ${OTP_TTL_MIN} minutes. Never share it with anyone.`,
+      html: `<p>Your DriveLocal verification code is <strong>${code}</strong>.</p><p>Valid for ${OTP_TTL_MIN} minutes. Never share it with anyone.</p>`,
+    });
+  } else {
+    await sms.send({
+      to: normalized,
+      body: `DriveLocal: your verification code is ${code}. Valid for ${OTP_TTL_MIN} minutes.`,
+    });
+  }
+
+  return { phone: normalized, expiresInSeconds: OTP_TTL_MIN * 60, dev: !canEmail, delivery: canEmail ? 'email' : 'console' };
 }
 
 function lookupUserByPhone(normalized, role) {
@@ -85,8 +100,8 @@ function verifyOtp({ phone, code, name, email, role }) {
     return { success: false, error: 'Too many attempts, try again shortly', retryAfterSec: verifyLimit.retryAfterSec };
   }
 
-  // The code is generated + stored locally (see requestOtp) and delivered by
-  // `sms.send`; validate against our own record in every environment.
+  // The code is generated + stored locally (see requestOtp); validate against
+  // our own record in every environment.
   const otp = repo.getOtp(normalized);
   if (!otp) return { success: false, error: 'No code requested' };
 

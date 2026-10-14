@@ -91,6 +91,65 @@ function driverRoutes({ notify }) {
     res.json({ wallet: repo.getWallet(req.user.id) });
   });
 
+  // --- Driver bank account (for payouts) ---
+  router.get('/bank-account', (req, res) => {
+    res.json({ account: repo.getBankAccount(req.user.id) });
+  });
+
+  router.put('/bank-account', (req, res, next) => {
+    try {
+      const { accountHolder, bankName, accountNumber, accountType, branchCode } = req.body || {};
+      if (!accountHolder || !bankName || !accountNumber) {
+        return res.status(400).json({ error: 'accountHolder, bankName and accountNumber are required' });
+      }
+      if (String(accountNumber).replace(/\s+/g, '').length < 6) {
+        return res.status(400).json({ error: 'Account number looks too short' });
+      }
+      const account = repo.saveBankAccount(req.user.id, {
+        accountHolder: String(accountHolder).trim(),
+        bankName: String(bankName).trim(),
+        accountNumber: String(accountNumber).replace(/\s+/g, ''),
+        accountType: String(accountType || 'current').trim(),
+        branchCode: branchCode ? String(branchCode).trim() : null,
+      });
+      res.json({ account });
+    } catch (e) { next(e); }
+  });
+
+  // --- Driver payout requests (manual settlement by the platform owner) ---
+  router.get('/payouts', (req, res) => {
+    res.json({ payouts: repo.listPayoutRequestsForDriver(req.user.id) });
+  });
+
+  router.post('/payouts', (req, res, next) => {
+    try {
+      const amountCents = Math.round(Number(req.body?.amountCents || req.body?.amount * 100));
+      const note = req.body?.note;
+      if (!Number.isFinite(amountCents) || amountCents <= 0) {
+        return res.status(400).json({ error: 'amount must be a positive number of cents' });
+      }
+      if (!repo.hasBankAccount(req.user.id)) {
+        return res.status(400).json({ error: 'Save a bank account before requesting a payout' });
+      }
+      const wallet = repo.getWallet(req.user.id);
+      if (amountCents > wallet.availableCents) {
+        return res.status(400).json({ error: 'Requested amount exceeds available balance' });
+      }
+      const payout = repo.createPayoutRequest(req.user.id, { amountCents, note });
+      res.json({ payout });
+    } catch (e) { next(e); }
+  });
+
+  router.post('/payouts/:id/cancel', (req, res, next) => {
+    try {
+      const payout = repo.getPayoutRequest(req.params.id);
+      if (!payout || payout.driverId !== req.user.id) return res.status(404).json({ error: 'Payout not found' });
+      if (payout.status !== 'pending') return res.status(400).json({ error: 'Only pending payouts can be cancelled' });
+      const updated = repo.setPayoutRequestStatus(req.params.id, 'cancelled', { reviewedBy: req.user.id });
+      res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
+
   // Update driver profile / rates.
   router.put('/profile', (req, res, next) => {
     try {
@@ -103,10 +162,17 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // Go online / offline.
+  // Go online / offline. Going online requires the identity documents (ID copy
+  // + selfie) on file — offline is always allowed so nobody gets stuck.
   router.post('/online', (req, res, next) => {
     try {
       const { isOnline } = req.body;
+      if (isOnline && req.user.role !== 'admin' && !repo.hasDriverIdentity(req.user.id)) {
+        return res.status(403).json({
+          error: 'Upload your identification documents before taking rides',
+          code: 'DOCUMENTS_REQUIRED',
+        });
+      }
       const driver = repo.setDriverOnline(req.user.id, !!isOnline);
       res.json(driver);
     } catch (e) { next(e); }

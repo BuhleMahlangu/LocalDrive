@@ -22,7 +22,7 @@ export default function Landing({ onChoose }) {
         <p className="hero-tagline">{t('landing.tagline')}</p>
       </div>
 
-      <div className="card landing-card">
+      <div className="card landing-card animate-in">
         {online != null && (
           <div className={`online-strip ${online ? 'up' : ''}`}>
             {online
@@ -36,9 +36,9 @@ export default function Landing({ onChoose }) {
         </button>
 
         <div className="hero-feats">
-          <span className="feat">Live GPS tracking</span>
-          <span className="feat">Cash or card</span>
-          <span className="feat">Drop-pin pickup</span>
+          <span className="feat"><Icon name="car" size={14} /> Live GPS tracking</span>
+          <span className="feat">💳 Cash or card</span>
+          <span className="feat">📍 Drop-pin pickup</span>
         </div>
 
         <div className="landing-divider">{t('common.driver')}?</div>
@@ -46,7 +46,7 @@ export default function Landing({ onChoose }) {
         <button type="button" className="btn driver big" onClick={() => onChoose('driver')}>
           <Icon name="car" size={20} /> {t('landing.driver')}
         </button>
-        <p className="hint">{t('login.driverHint')} — {t('landing.driverShort')}</p>
+        <p className="hint">{t('login.driverHint')}</p>
       </div>
     </div>
   );

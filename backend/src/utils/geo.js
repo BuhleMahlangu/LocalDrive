@@ -48,10 +48,6 @@ function isWithinService(serviceKm, driverLat, driverLng, pickupLat, pickupLng, 
   return { ok: dist <= radiusKm + serviceKm, distKm: dist };
 }
 
-function makeOtp() {
-  return String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-}
-
 module.exports = {
   uid,
   now,
@@ -59,5 +55,4 @@ module.exports = {
   estimatedRoadKm,
   distToSegmentKm,
   isWithinService,
-  makeOtp,
 };

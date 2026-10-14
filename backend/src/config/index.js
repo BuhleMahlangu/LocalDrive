@@ -12,15 +12,6 @@ const config = {
   // the driver-only routes to this phone is what stops a stranger registering
   // as "the driver" and seeing other customers' bookings.
   driverPhone: process.env.DRIVER_PHONE || '+27000000000',
-  // ClickSend delivers the OTP SMS. The API authenticates with the account
-  // username + API key (Basic auth). `from` is optional (alpha tag must be
-  // WASPA-registered for SA; leave blank to use the account's default sender).
-  clickSend: {
-    username: process.env.CLICKSEND_USERNAME,
-    apiKey: process.env.CLICKSEND_API_KEY,
-    from: process.env.SMS_FROM,
-    source: process.env.SMS_SOURCE || 'DriveLocal',
-  },
   yoco: {
     publishableKey: process.env.YOCO_PUBLISHABLE_KEY,
     secretKey: process.env.YOCO_SECRET_KEY,
@@ -43,6 +34,17 @@ const config = {
   dbDriver: process.env.DB_DRIVER || 'sqlite',
   databaseUrl: process.env.DATABASE_URL,
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
+  bankDetailsKey: process.env.BANK_DETAILS_KEY,
+  payoutWebhookSecret: process.env.PAYOUT_WEBHOOK_SECRET,
+  smtp: {
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587', 10),
+    secure: process.env.SMTP_SECURE === 'true' || process.env.SMTP_PORT === '465',
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+    from: process.env.SMTP_FROM || process.env.SMTP_USER || 'DriveLocal <no-reply@drivelocal.co.za>',
+    replyTo: process.env.SMTP_REPLY_TO,
+  },
   // Public OSRM demo server. Used whenever no GOOGLE_MAPS_API_KEY is configured
   // so routes follow real roads instead of a straight line. Point this at your
   // own OSRM instance (self-hosted or paid) for production traffic — the demo
@@ -52,15 +54,12 @@ const config = {
     .split(',').map((s) => s.trim()).filter(Boolean),
 };
 
-// Fail fast in production: never run with a known default secret, without SMS
-// delivery for OTPs, or without the owner-driver phone configured.
+// Fail fast in production: never run with a known default secret or without the
+// owner-driver phone configured.
 if (nodeEnv === 'production') {
   const problems = [];
   if (!jwtSecret || jwtSecret === 'dev-secret-change-me' || jwtSecret.length < 32) {
     problems.push('JWT_SECRET must be a strong random secret (32+ characters)');
-  }
-  if (!process.env.CLICKSEND_USERNAME || !process.env.CLICKSEND_API_KEY) {
-    problems.push('ClickSend credentials (CLICKSEND_USERNAME / CLICKSEND_API_KEY) are required to deliver OTP SMS');
   }
   if (!process.env.DRIVER_PHONE) {
     problems.push('DRIVER_PHONE must be set to the owner-driver phone in E.164 format');
@@ -68,6 +67,9 @@ if (nodeEnv === 'production') {
   if (problems.length) {
     throw new Error(`DriveLocal refuses to start in production:\n - ${problems.join('\n - ')}`);
   }
+  // Non-fatal: the interim fixed OTP is deliberate until a provider lands, but
+  // it must be impossible to miss in the deploy logs.
+  console.warn('[config] ⚠ No SMS/OTP provider integrated — the verification code is fixed at 123456 for every number. Anyone who knows this can sign in as anyone. Integrate an OTP provider before real users.');
 } else if (!jwtSecret || jwtSecret === 'dev-secret-change-me') {
   // Development convenience: keep running, but make it obvious the default secret
   // is in use so nobody accidentally ships it to a public server.

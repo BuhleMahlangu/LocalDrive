@@ -10,13 +10,12 @@ const MAX_PER_WINDOW = 3;
 const MAX_PER_DAY = 10;
 const MAX_VERIFY_PER_WINDOW = 5;
 
-// Outside production the OTP is a fixed dev code delivered by a console log
-// (see services/sms.js), so there is no SMS cost and no real message to abuse.
-// The *request* caps exist purely for that production concern, and they are the
-// ones that break legitimate local/CI activity: the e2e suite signs the same
-// owner phone in from several specs inside one window. Relax them in dev/test
-// only. The verify cap is deliberately left alone so login brute-force
-// protection is identical in every environment.
+// The *request* caps exist for real SMS delivery (cost + bombing; see the
+// TODO in services/sms.js) and they are the ones that break legitimate
+// local/CI activity: the e2e suite signs the same owner phone in from several
+// specs inside one window. Relax them in dev/test only. The verify cap is
+// deliberately left alone so login brute-force protection is identical in
+// every environment.
 const isProd = config.nodeEnv === 'production';
 const OTP_MAX_PER_WINDOW = isProd ? MAX_PER_WINDOW : 1000;
 const OTP_MAX_PER_DAY = isProd ? MAX_PER_DAY : 10000;

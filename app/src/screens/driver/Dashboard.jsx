@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Map from '../../components/Map.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import Chat from '../../components/Chat.jsx';
-import { api, connectSocket, formatRand, toTel, toWhatsApp } from '../../api.js';
+import { api, apiUpload, connectSocket, formatRand, toTel, toWhatsApp, validateSaId } from '../../api.js';
 import decodePolyline from '../../lib/polyline.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 import { sendSos } from '../../lib/emergency.js';
@@ -59,6 +59,15 @@ export default function Dashboard({ user, onUserUpdate }) {
   // Surfaced in the UI: a driver who is online but has no GPS is invisible to
   // customers and has no idea why.
   const [gpsError, setGpsError] = useState('');
+  // Identity gate: approved drivers still need an ID copy + selfie on file
+  // (legacy accounts approved before the gate shipped are missing both).
+  const [needsDocs, setNeedsDocs] = useState(false);
+  const [showDocsForm, setShowDocsForm] = useState(false);
+  const [docsIdNumber, setDocsIdNumber] = useState('');
+  const [docsIdCopy, setDocsIdCopy] = useState(null);
+  const [docsSelfie, setDocsSelfie] = useState(null);
+  const [docsError, setDocsError] = useState('');
+  const [docsBusy, setDocsBusy] = useState(false);
   // Track GPS positions during an ongoing trip for actual distance calculation.
   const tripLocs = useRef([]);
   const tripStart = useRef(null);
@@ -157,6 +166,14 @@ export default function Dashboard({ user, onUserUpdate }) {
   }, []);
 
   useEffect(() => { refreshSpots(); }, [refreshSpots]);
+
+  // Check whether this (non-admin) driver has the identity documents on file.
+  useEffect(() => {
+    if (user.role !== 'driver') return;
+    api('/driver/application')
+      .then((r) => setNeedsDocs(!(r.application?.idCopyUrl && r.application?.selfieUrl)))
+      .catch(() => {});
+  }, [user.role, user.driverStatus]);
 
   // Socket lifecycle
   useEffect(() => {
@@ -323,8 +340,51 @@ export default function Dashboard({ user, onUserUpdate }) {
       if (socketRef.current) socketRef.current.emit('driver:online', next);
       if (next) { publishLocation(socketRef.current); setToast('You are now online'); }
       else setToast('You are offline');
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // The identity gate refused — surface the upload card instead of a
+      // silent dead end.
+      if (e.code === 'DOCUMENTS_REQUIRED') setNeedsDocs(true);
+      setError(e.message);
+    }
     finally { setBusy(false); }
+  }
+
+  function onDocsFile(setter) {
+    return (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) setter(f);
+    };
+  }
+
+  // Top up the missing identity documents without losing approved status
+  // (POST /driver/register keeps approved drivers approved).
+  async function submitDocs(e) {
+    e.preventDefault();
+    setDocsError('');
+    if (!validateSaId(docsIdNumber)) {
+      setDocsError('Please enter a valid 13-digit SA ID number (e.g. 9001015800088).');
+      return;
+    }
+    if (!docsIdCopy || !docsSelfie) {
+      setDocsError('Upload both your ID copy and a selfie to continue.');
+      return;
+    }
+    setDocsBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append('idNumber', docsIdNumber.trim());
+      fd.append('idCopy', docsIdCopy);
+      fd.append('selfie', docsSelfie);
+      const res = await apiUpload('/driver/register', fd);
+      if (res.user) onUserUpdate(res.user);
+      setNeedsDocs(false);
+      setShowDocsForm(false);
+      setToast('Documents submitted — you can go online now');
+    } catch (err) {
+      setDocsError(err.message);
+    } finally {
+      setDocsBusy(false);
+    }
   }
 
   async function act(action, extra = {}) {
@@ -492,10 +552,51 @@ export default function Dashboard({ user, onUserUpdate }) {
           <p className="subtitle">{online ? 'Customers can see you and book rides' : 'Customers will see "driver unavailable"'}</p>
         </div>
         <label className="switch">
-          <input type="checkbox" checked={online} onChange={toggleOnline} disabled={busy} />
+          <input type="checkbox" checked={online} onChange={toggleOnline} disabled={busy || (needsDocs && !online)} />
           <span className="slider" />
         </label>
       </div>
+
+      {needsDocs && (
+        <div className="card">
+          <h3>🛡 Verify your identity</h3>
+          <p className="hint">
+            For everyone's safety, you need an ID copy and a selfie on file before
+            you can take rides.
+          </p>
+          {showDocsForm ? (
+            <form onSubmit={submitDocs}>
+              <div className="field">
+                <span className="field-label">SA ID number</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={13}
+                  value={docsIdNumber}
+                  onChange={(e) => setDocsIdNumber(e.target.value)}
+                  placeholder="e.g. 9001015800088"
+                />
+              </div>
+              <div className="field">
+                <span className="field-label">Copy of ID</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" onChange={onDocsFile(setDocsIdCopy)} />
+              </div>
+              <div className="field">
+                <span className="field-label">Your photo</span>
+                <input type="file" accept="image/jpeg,image/png,image/webp" onChange={onDocsFile(setDocsSelfie)} />
+                <p className="hint">A clear picture of your face.</p>
+              </div>
+              {docsError && <p className="error">{docsError}</p>}
+              <div className="btn-row" style={{ marginTop: '6px' }}>
+                <button type="button" className="btn" onClick={() => { setShowDocsForm(false); setDocsError(''); }} disabled={docsBusy}>Cancel</button>
+                <button type="submit" className="btn primary" disabled={docsBusy}>{docsBusy ? 'Submitting…' : 'Submit documents'}</button>
+              </div>
+            </form>
+          ) : (
+            <button type="button" className="btn primary" onClick={() => setShowDocsForm(true)}>Upload documents</button>
+          )}
+        </div>
+      )}
 
       {pending && (
         <div className="card request-card">

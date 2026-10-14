@@ -105,6 +105,12 @@ before(async () => {
   // Log the customer in once and reuse the token: the OTP request limiter
   // allows only 3 requests / 60s per phone, and every test books a trip.
   const customer = await login('+27739998888', 'customer', 'Lerato', 'l@x.za');
+  // Booking requires an ID copy + selfie on file.
+  repo.saveCustomerIdentity(customer.user.id, {
+    idNumber: '9001015800088',
+    idCopyPath: `${customer.user.id}_idcopy.jpg`,
+    selfiePath: `${customer.user.id}_selfie.jpg`,
+  });
   customerToken = customer.token;
 });
 
@@ -145,6 +151,13 @@ function ensureDriver() {
   if (!driver) {
     driver = repo.createUser({ phone: '+27000000000', name: 'Thabo', email: 'd@x.za', role: 'driver' });
   }
+  // Ride gates need an ID copy + selfie on file before the driver can accept.
+  repo.saveDriverApplication(driver.id, {
+    idNumber: '9001015800088',
+    idCopyPath: `${driver.id}_idcopy.jpg`,
+    selfiePath: `${driver.id}_selfie.jpg`,
+    proofOfResidencePath: `${driver.id}_proof.jpg`,
+  });
   repo.setDriverOnline(driver.id, true);
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
