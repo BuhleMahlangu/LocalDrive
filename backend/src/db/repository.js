@@ -488,6 +488,20 @@ module.exports = {
     return !!this.getBankAccount(driverId);
   },
 
+  getBankAccountForExport(driverId) {
+    const row = db.prepare(
+      'SELECT account_holder, bank_name, account_number, account_type, branch_code FROM driver_bank_accounts WHERE driver_id = ?',
+    ).get(driverId);
+    if (!row) return null;
+    return {
+      accountHolder: row.account_holder,
+      bankName: row.bank_name,
+      accountNumber: decryptBankAccountNumber(row.account_number),
+      accountType: row.account_type,
+      branchCode: row.branch_code,
+    };
+  },
+
   createPayoutRequest(driverId, { amountCents, note }) {
     const id = uid('payout');
     db.prepare(

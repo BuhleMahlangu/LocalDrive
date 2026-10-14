@@ -778,6 +778,7 @@ function PayoutsTab() {
         ))}
         <button className="btn small" onClick={load} disabled={busy}>Refresh</button>
         <button className="btn small" onClick={() => apiDownload('/admin/payouts?format=csv', { filename: 'payouts.csv' })} disabled={busy}>Export CSV</button>
+        <button className="btn small" onClick={() => apiDownload('/admin/payouts?format=eft', { filename: 'payouts-eft.csv' })} disabled={busy}>Export EFT</button>
       </div>
       {error && <p className="error">{error}</p>}
       {message && <p className="success">{message}</p>}

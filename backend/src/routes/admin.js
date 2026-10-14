@@ -185,6 +185,29 @@ router.delete('/spots/:id', (req, res, next) => {
       res.setHeader('Content-Disposition', 'attachment; filename="payouts.csv"');
       return res.send(csv);
     }
+    if (String(req.query.format || '').toLowerCase() === 'eft') {
+      const eftHeader = ['id', 'driver', 'phone', 'amountCents', 'status', 'accountHolder', 'bankName', 'accountNumber', 'branchCode', 'accountType', 'createdAt'];
+      const eftRows = payouts.map((p) => {
+        const acct = repo.getBankAccountForExport(p.driverId);
+        return [
+          p.id,
+          JSON.stringify(p.driverName || ''),
+          JSON.stringify(p.driverPhone || ''),
+          p.amountCents,
+          p.status,
+          JSON.stringify(acct?.accountHolder || ''),
+          JSON.stringify(acct?.bankName || ''),
+          JSON.stringify(acct?.accountNumber || ''),
+          JSON.stringify(acct?.branchCode || ''),
+          JSON.stringify(acct?.accountType || ''),
+          p.createdAt,
+        ].join(',');
+      });
+      const csv = [eftHeader.join(','), ...eftRows].join('\\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="payouts-eft.csv"');
+      return res.send(csv);
+    }
     res.json({ payouts });
   });
 
