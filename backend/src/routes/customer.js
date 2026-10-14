@@ -6,6 +6,7 @@ const tripService = require('../services/trips');
 const push = require('../services/push');
 const uploadsService = require('../services/uploads');
 const { isValidSaId } = require('../services/saidNumber');
+const { haversineKm } = require('../utils/geo');
 
 // Factory takes socket notify helpers so REST can push realtime updates.
 function customerRoutes({ notify }) {
@@ -211,7 +212,16 @@ function customerRoutes({ notify }) {
       // Fan the request out to every online approved driver (immediate trips).
       // Scheduled trips live in every approved driver's Upcoming list instead,
       // with a heads-up push so they know to look.
-      const drivers = repo.listOnlineDrivers();
+      // Fan out in a fairness order: nearest vetted online driver first, then by
+      // rating. First-wins claiming still governs who actually gets the trip.
+      const drivers = repo.listOnlineDrivers().slice().sort((a, b) => {
+        const la = repo.getDriverLocation(a.id);
+        const lb = repo.getDriverLocation(b.id);
+        const da = la && la.lat != null ? haversineKm(la.lat, la.lng, pickup.lat, pickup.lng) : Infinity;
+        const db = lb && lb.lat != null ? haversineKm(lb.lat, lb.lng, pickup.lat, pickup.lng) : Infinity;
+        if (da !== db) return da - db;
+        return (b.rating || 0) - (a.rating || 0);
+      });
       if (!trip.scheduledAt) {
         for (const d of drivers) notify.newTripToDriver(trip, d.id, driverPublic);
       } else {
