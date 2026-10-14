@@ -158,6 +158,17 @@ router.delete('/spots/:id', (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+  // ---------- Per-driver ops dashboard ----------
+  router.get('/driver-ops', (_req, res) => {
+    const list = repo.listDriversForAdmin();
+    res.json({
+      drivers: list.map((d) => ({
+        ...d,
+        analytics: repo.getDriverAnalytics(d.user.id),
+      })),
+    });
+  });
+
   // ---------- Payout requests (manual settlement) ----------
   router.get('/payouts', (req, res) => {
     const status = req.query.status ? String(req.query.status).trim() : null;

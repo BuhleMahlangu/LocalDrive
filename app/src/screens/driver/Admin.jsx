@@ -21,9 +21,10 @@ export default function Admin() {
         <button className={`btn small ${tab === 'records' ? 'driver' : ''}`} onClick={() => setTab('records')}>Records</button>
         <button className={`btn small ${tab === 'spots' ? 'driver' : ''}`} onClick={() => setTab('spots')}>Spots</button>
         <button className={`btn small ${tab === 'payouts' ? 'driver' : ''}`} onClick={() => setTab('payouts')}>Payouts</button>
+        <button className={`btn small ${tab === 'ops' ? 'driver' : ''}`} onClick={() => setTab('ops')}>Ops</button>
         <button className={`btn small ${tab === 'settings' ? 'driver' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
-      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : <SettingsTab />}
+      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : tab === 'ops' ? <OpsTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -802,6 +803,64 @@ function PayoutsTab() {
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+function OpsTab() {
+  const [drivers, setDrivers] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = () => {
+    setBusy(true);
+    setError('');
+    api('/admin/driver-ops')
+      .then((r) => setDrivers(r.drivers || []))
+      .catch((e) => setError(e.message))
+      .finally(() => setBusy(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  return (
+    <div className="card">
+      <h3>Driver operations dashboard</h3>
+      <button className="btn small" onClick={load} disabled={busy}>Refresh</button>
+      {error && <p className="error">{error}</p>}
+      {busy && <p className="hint">Loading�</p>}
+      {!busy && drivers.length === 0 && <EmptyState title="No drivers" message="Driver accounts will appear here." />}
+      <div style={{ overflowX: 'auto', marginTop: '10px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>Driver</th>
+              <th>Status</th>
+              <th>Online</th>
+              <th>Trips</th>
+              <th>Completed</th>
+              <th>Acceptance</th>
+              <th>Rating</th>
+              <th>Available</th>
+              <th>Owed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {drivers.map((d) => (
+              <tr key={d.user.id}>
+                <td>{d.user.name || d.user.phone}</td>
+                <td>{d.user.driverStatus || 'approved'}</td>
+                <td>{d.user.isOnline ? 'Yes' : 'No'}</td>
+                <td>{d.analytics?.totalTrips ?? 0}</td>
+                <td>{d.analytics?.completedTrips ?? 0}</td>
+                <td>{d.analytics?.acceptanceRate ?? 100}%</td>
+                <td>{d.user.rating != null ? d.user.rating.toFixed(1) : '�'}</td>
+                <td>{formatRand((d.wallet?.availableCents || 0) / 100)}</td>
+                <td>{formatRand((d.wallet?.owedCents || 0) / 100)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
