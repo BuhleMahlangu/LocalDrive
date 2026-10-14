@@ -756,10 +756,10 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       </div>
 
       {showConfirm && estimate && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="book-confirm-title">
           <div className="modal-card">
             <div className="book-header">
-              <h2>{t('book.review')}</h2>
+              <h2 id="book-confirm-title">{t('book.review')}</h2>
             </div>
 
             <div className="route-line">

@@ -457,7 +457,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       </div>
 
       {sosOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" role="dialog" aria-modal="true">
           <form className="modal-card sos-modal" onSubmit={saveSosContact}>
             <div className="book-header">
               <h2>🆘 SOS contact</h2>
@@ -481,7 +481,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       )}
 
       {cancelOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="book-header">
               <h2>Cancel this ride?</h2>
@@ -515,7 +515,7 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       )}
 
       {disputeOpen && (
-        <div className="modal-overlay">
+        <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal-card">
             <div className="book-header">
               <h2>Dispute this fare</h2>
