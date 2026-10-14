@@ -31,6 +31,8 @@ function createApp({ notify }) {
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     if (config.nodeEnv === 'production') {
       res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+      res.setHeader('Content-Security-Policy',
+        "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss: https:; font-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'");
     }
     next();
   });
