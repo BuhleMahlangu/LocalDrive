@@ -5,6 +5,10 @@
 
 const config = require('../config');
 
+const persist = process.env.RATE_LIMIT_PERSIST === 'true';
+let repo = null;
+if (persist) repo = require('../db/repository');
+
 const WINDOW_MS = 60 * 1000;
 const MAX_PER_WINDOW = 3;
 const MAX_PER_DAY = 10;
@@ -32,9 +36,47 @@ function prune() {
   }
 }
 
+// ---------- Optional DB-backed persistence (shared across processes/restarts) ----------
+function dbCheck(key, max, ttlMs) {
+  if (!repo) return { ok: true };
+  const now = Date.now();
+  const row = repo.db.prepare('SELECT count, reset_at FROM rate_limit_counters WHERE key = ?').get(key);
+  if (!row || row.reset_at <= now) {
+    repo.db.prepare(
+      'INSERT INTO rate_limit_counters (key, count, reset_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET count = 1, reset_at = excluded.reset_at',
+    ).run(key, 1, now + ttlMs);
+    return { ok: true, retryAfterSec: 0 };
+  }
+  if (row.count >= max) {
+    const retryAfterSec = Math.max(1, Math.ceil((row.reset_at - now) / 1000));
+    return { ok: false, retryAfterSec };
+  }
+  repo.db.prepare('UPDATE rate_limit_counters SET count = count + 1 WHERE key = ?').run(key);
+  return { ok: true, retryAfterSec: 0 };
+}
+
+function dbCheckOtp(phone) {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const midnight = new Date(now);
+  midnight.setUTCDate(midnight.getUTCDate() + 1);
+  midnight.setUTCHours(0, 0, 0, 0);
+  const dailyTtlMs = Math.max(1, midnight.getTime() - now.getTime());
+  const dayRes = dbCheck(`otp:daily:${phone}:${today}`, OTP_MAX_PER_DAY, dailyTtlMs);
+  if (!dayRes.ok) return { ok: false, code: 'DAILY_LIMIT', retryAfterSec: 60 };
+  const winRes = dbCheck(`otp:win:${phone}`, OTP_MAX_PER_WINDOW, WINDOW_MS);
+  if (!winRes.ok) return { ok: false, code: 'TOO_FREQUENT', retryAfterSec: winRes.retryAfterSec };
+  return { ok: true };
+}
+
 // IPv6 / behind a proxy "IP" strings are fine as opaque keys.
 function checkOtpIpLimit(ip) {
   if (!ip || isProd === false) return { ok: true };
+  if (persist) {
+    const res = dbCheck(`ip:win:${ip}`, 12, WINDOW_MS);
+    if (!res.ok) return { ok: false, code: 'IP_TOO_FREQUENT', retryAfterSec: res.retryAfterSec };
+    return { ok: true };
+  }
   const nowMs = Date.now();
   let rec = ipBuckets.get(ip);
   if (!rec || !rec.timestamps || rec.timestamps.length === 0 || nowMs - rec.timestamps[rec.timestamps.length - 1] > 60 * 60 * 1000) {
@@ -52,6 +94,7 @@ function checkOtpIpLimit(ip) {
 }
 
 function checkOtpLimit(phone) {
+  if (persist) return dbCheckOtp(phone);
   const nowMs = Date.now();
   const today = new Date().toISOString().slice(0, 10);
   let rec = buckets.get(phone);
@@ -77,6 +120,11 @@ function checkOtpLimit(phone) {
 }
 
 function checkVerifyLimit(phone) {
+  if (persist) {
+    const res = dbCheck(`verify:win:${phone}`, MAX_VERIFY_PER_WINDOW, WINDOW_MS);
+    if (!res.ok) return { ok: false, retryAfterSec: res.retryAfterSec };
+    return { ok: true };
+  }
   const nowMs = Date.now();
   let rec = verifyBuckets.get(phone);
   if (!rec) {

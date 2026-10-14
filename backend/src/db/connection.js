@@ -107,6 +107,12 @@ CREATE TABLE IF NOT EXISTS payout_requests (
 CREATE INDEX IF NOT EXISTS idx_payout_requests_driver ON payout_requests(driver_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_payout_requests_status ON payout_requests(status);
 
+CREATE TABLE IF NOT EXISTS rate_limit_counters (
+  key       TEXT PRIMARY KEY,
+  count     INTEGER NOT NULL DEFAULT 0,
+  reset_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS driver_locations (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   driver_id  TEXT NOT NULL,
