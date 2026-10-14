@@ -1331,3 +1331,18 @@ body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; 
   margin: 0;
   max-width: 36ch;
 }
+
+/* Trusted-driver badge used on the Home screen. */
+.badge.verified::before { content: '?'; margin-right: 4px; }
+.badge.verified {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--primary-ink);
+  font-weight: 700;
+  font-size: .72rem;
+  letter-spacing: .2px;
+  vertical-align: middle;
+  border: 1px solid rgba(22, 163, 74, 0.24);
+}

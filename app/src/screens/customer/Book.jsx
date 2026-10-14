@@ -770,7 +770,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
             </div>
 
             <div className="receipt-row total" style={{ marginTop: '8px' }}>
-              <span>Estimated fare</span><span>{formatRand(estimate.total)}</span>
+              <span>Estimated fare (no surge)</span><span>{formatRand(estimate.total)}</span>
             </div>
             <p className="hint">{trip?.distanceKm ?? '-'} km · {trip?.durationMin ?? '-'} min</p>
 

@@ -41,7 +41,7 @@ const EN = {
   'trips.customer': 'Customer',
 
   // Landing
-  'landing.tagline': "Thubelihle & Kriel's friendly local ride — book in seconds.",
+  'landing.tagline': "Thubelihle & Kriel's friendly local ride — book in seconds, no surge pricing.",
   'landing.online': 'is online — book a ride now',
   'landing.offline': 'is offline right now — you can still schedule ahead',
   'landing.customer': 'Book a ride',

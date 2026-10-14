@@ -78,7 +78,7 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
         <button className="btn primary big" onClick={onBook}>
           <Icon name="book" size={21} /> {t('home.book')}
         </button>
-        <p className="hint" style={{ margin: '10px 0 0' }}>Live GPS · Cash or card · No street names needed</p>
+        <p className="hint" style={{ margin: '10px 0 0' }}>Live GPS · Cash or card · No street names needed · <strong>No surge pricing, ever</strong></p>
       </div>
 
       {active && (
@@ -133,9 +133,10 @@ export default function Home({ user, onBook, onResume, onRebook, onPickPlace, re
           <div className="driver-row">
             <div className="avatar">{driver.photoUrl ? <img src={driver.photoUrl} alt="" /> : (driver.name || 'D')[0]}</div>
             <div>
-              <h3>{driver.name || t('home.yourDriver')}</h3>
+              <h3>{driver.name || t('home.yourDriver')} <span className="badge verified" style={{ marginLeft: '6px' }}>Verified driver</span></h3>
               <p>{driver.vehicleType || 'Vehicle'}{driver.licensePlate ? ` · ${driver.licensePlate}` : ''}</p>
-              {driver.rating != null && <p className="stars">★ {driver.rating.toFixed(1)} ({driver.ratingCount})</p>}
+              {driver.rating != null && <p className="stars">? {driver.rating.toFixed(1)} ({driver.ratingCount})</p>}
+              <p className="hint" style={{ margin: '6px 0 0' }}>Trusted local driver � no surge, transparent fare</p>
             </div>
           </div>
           <p className="rate-line">
