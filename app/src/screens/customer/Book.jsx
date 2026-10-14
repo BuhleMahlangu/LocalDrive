@@ -402,7 +402,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       promoCode: promoApplied?.code || null,
     };
     api('/customer/trips', { method: 'POST', body: payload })
-      .then((res) => { setShowConfirm(false); onRequest(res.trip); })
+      .then((res) => { flushPending(); setShowConfirm(false); onRequest(res.trip); })
       .catch((err) => {
         // The gate can flip under us — show the verify panel instead of a
         // dead-end modal error.
@@ -411,12 +411,57 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
           setShowVerify(true);
           setError(err.message);
           api('/customer/identity').then(setIdentity).catch(() => {});
-        } else {
-          setModalError(err.message);
+          return;
         }
+        // Network / offline: save the booking locally and retry automatically
+        // when connectivity returns — keeps us usable on rural, low-signal roads
+        // where global apps fall over.
+        if (!err.status && /fetch|network|offline/i.test(err.message || '')) {
+          try {
+            const key = 'drivelocal_pending_bookings';
+            const queued = JSON.parse(localStorage.getItem(key) || '[]');
+            queued.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8), payload, savedAt: Date.now() });
+            localStorage.setItem(key, JSON.stringify(queued));
+            setShowConfirm(false);
+            setModalError('No connection. Your booking was saved and will be sent automatically when you are back online.');
+            return;
+          } catch {
+            // fall through to normal error
+          }
+        }
+        setModalError(err.message);
       })
       .finally(() => setLoading(false));
   }
+
+  // Send any bookings that were queued while offline.
+  function flushPending() {
+    const key = 'drivelocal_pending_bookings';
+    let queued = [];
+    try { queued = JSON.parse(localStorage.getItem(key) || '[]'); } catch { queued = []; }
+    if (!queued.length) return;
+    const [item, ...rest] = queued;
+    api('/customer/trips', { method: 'POST', body: item.payload })
+      .then((res) => {
+        try { localStorage.setItem(key, JSON.stringify(rest)); } catch { /* ignore */ }
+        if (res?.trip) {
+          // Best-effort: surface nothing, just keep queue moving.
+        }
+      })
+      .catch(() => {
+        // Keep queued item for a later retry.
+      })
+      .finally(() => {
+        // Retry the rest on next online tick.
+      });
+  }
+
+  useEffect(() => {
+    const handler = () => flushPending();
+    window.addEventListener('online', handler);
+    if (navigator.onLine) flushPending();
+    return () => window.removeEventListener('online', handler);
+  }, []);
 
   const markers = useMemo(() => {
     const m = [];
@@ -780,6 +825,14 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
             </div>
 
             {modalError && <p className="error">{modalError}</p>}
+            <p className="hint" style={{ margin: '8px 0 0' }}>
+              No connection? You can still request a ride by
+              {' '}
+              <a href={toWhatsApp(import.meta.env.VITE_DRIVER_PHONE || '+27000000000', `DriveLocal booking: pickup ${pickup?.address || 'TBA'} -> destination ${dest?.address || 'TBA'}`)} target="_blank" rel="noreferrer">
+                WhatsApp
+              </a>
+              {' '}and we will lock it in when we reconnect.
+            </p>
 
             <div className="btn-row" style={{ marginTop: '14px' }}>
               <button className="btn" onClick={() => setShowConfirm(false)} disabled={loading}>{t('common.back')}</button>
