@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Map from '../../components/Map.jsx';
 import Skeleton from '../../components/Skeleton.jsx';
 import Chat from '../../components/Chat.jsx';
-import { api, apiUpload, connectSocket, formatRand, toTel, toWhatsApp, validateSaId } from '../../api.js';
+import { api, apiUpload, connectSocket, formatRand, toTel, toWhatsApp, validateSaId, isAdminUser } from '../../api.js';
 import decodePolyline from '../../lib/polyline.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 import { sendSos } from '../../lib/emergency.js';
@@ -26,6 +26,7 @@ function gpsErrorMessage(err) {
 
 export default function Dashboard({ user, onUserUpdate }) {
   const [online, setOnline] = useState(!!user.isOnline);
+  const [onlineDriverCount, setOnlineDriverCount] = useState(null);
   const [pending, setPending] = useState(null);
   const [active, setActive] = useState(null);
   const [earnings, setEarnings] = useState(null);
@@ -75,6 +76,19 @@ export default function Dashboard({ user, onUserUpdate }) {
   useEffect(() => { driverLocRef.current = driverLoc; }, [driverLoc]);
   useEffect(() => { activeRef.current = active; }, [active]);
   useEffect(() => { onlineRef.current = online; }, [online]);
+
+  useEffect(() => {
+    if (!isAdminUser(user)) return;
+    let live = true;
+    api('/admin/drivers')
+      .then((r) => {
+        if (!live) return;
+        const count = (r.drivers || []).filter((d) => d.user && d.user.isOnline && (d.user.driverStatus === 'approved' || d.user.driverStatus === null)).length;
+        setOnlineDriverCount(count);
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [user]);
 
   const publishLocation = useCallback((socket) => {
     if (!navigator.geolocation) return;
@@ -543,6 +557,14 @@ export default function Dashboard({ user, onUserUpdate }) {
             </div>
             <p className="hint overlay-tip">Auto-declines in {countdown}s if you don't respond</p>
           </div>
+        </div>
+      )}
+
+      {isAdminUser(user) && onlineDriverCount != null && onlineDriverCount < 2 && (
+        <div className="card" style={{ borderColor: '#f97316' }}>
+          <p className="hint" style={{ margin: 0 }}>
+            Only {onlineDriverCount} driver{onlineDriverCount === 1 ? ' is' : 's are'} online right now. Approve and bring at least one backup vetted driver online for reliability.
+          </p>
         </div>
       )}
 

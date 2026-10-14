@@ -19,6 +19,7 @@ export default function Profile({ user, onUserUpdate }) {
 
   // Payout + bank account state.
   const [bank, setBank] = useState({ accountHolder: '', bankName: '', accountNumber: '', accountType: 'current', branchCode: '' });
+  const [identityStatus, setIdentityStatus] = useState(null);
   const [bankMsg, setBankMsg] = useState('');
   const [bankErr, setBankErr] = useState('');
   const [bankBusy, setBankBusy] = useState(false);
@@ -36,6 +37,7 @@ export default function Profile({ user, onUserUpdate }) {
     }).catch(() => {});
     api('/driver/wallet').then((r) => setWallet(r.wallet)).catch(() => {});
     api('/driver/payouts').then((r) => setPayouts(r.payouts || [])).catch(() => {});
+    api('/driver/application').then((r) => setIdentityStatus(r)).catch(() => {});
   }, []);
 
   function bankFromAccount(a) {
@@ -216,6 +218,18 @@ export default function Profile({ user, onUserUpdate }) {
                 ))}
               </ul>
             </div>
+          )}
+        </div>
+
+        <h3 className="section-title">Verification status</h3>
+        <div className="card">
+          <p className="hint" style={{ margin: 0 }}>
+            Role: <strong>{identityStatus?.role || user.role}</strong> · Status: <strong>{identityStatus?.driverStatus || user.driverStatus || 'n/a'}</strong>
+          </p>
+          {identityStatus && identityStatus.driverStatus !== 'approved' && (
+            <p className="hint" style={{ margin: '8px 0 0' }}>
+              Complete your identity documents and wait for admin approval before going online.
+            </p>
           )}
         </div>
 
