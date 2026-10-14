@@ -310,6 +310,11 @@ export default function ActiveTrip({ initial, onExit, onNewBooking }) {
       </div>
 
       <div className="card trip-card">
+        {trip.passengerName || trip.passengerPhone ? (
+          <div className="hint" style={{ margin: '6px 0' }}>
+            Passenger: {trip.passengerName || 'Guest'}{trip.passengerPhone ? ` · ${trip.passengerPhone}` : ''}
+          </div>
+        ) : null}
         <div className="route-line">
           <div className="route-row"><span className="dot pickup-dot" />{trip.pickup.address || 'Pickup'}</div>
           {trip.pickup.note && <div className="route-row"><span className="dot" style={{ background: 'transparent' }} />📍 <span className="hint" style={{ margin: 0 }}>{trip.pickup.note}</span></div>}

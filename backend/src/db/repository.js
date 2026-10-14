@@ -104,6 +104,8 @@ function mapTrip(row) {
     cancelReason: row.cancel_reason,
     cancelActor: row.cancel_actor,
     scheduledAt: row.scheduled_at,
+    passengerName: row.passenger_name,
+    passengerPhone: row.passenger_phone,
     arrivedAt: row.arrived_at,
     fareConfirmedAt: row.fare_confirmed_at,
     timestamps: {
@@ -632,8 +634,8 @@ module.exports = {
        (id, customer_id, driver_id, status, pickup_address, pickup_lat, pickup_lng,
         pickup_note, dest_address, dest_lat, dest_lng, dest_note, route_polyline,
         distance_km, duration_min, fare_estimate, price_model, promo_code, promo_percent,
-        payment_method, scheduled_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        payment_method, scheduled_at, passenger_name, passenger_phone)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id, data.customerId, data.driverId || null, data.status || 'requested',
       data.pickup?.address, data.pickup?.lat, data.pickup?.lng,
@@ -644,6 +646,7 @@ module.exports = {
       data.fareEstimate ?? null, data.priceModel || 'distance_time',
       data.promoCode || null, data.promoPercent || 0,
       data.paymentMethod || 'cash', data.scheduledAt || null,
+      data.passengerName || null, data.passengerPhone || null,
     );
     return this.getTripById(id);
   },

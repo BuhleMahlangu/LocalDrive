@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS trips (
   cancel_reason  TEXT,
   cancel_actor   TEXT,
   scheduled_at   TEXT,
+  passenger_name  TEXT,
+  passenger_phone TEXT,
   requested_at   TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at    TEXT,
   started_at     TEXT,
@@ -296,6 +298,8 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   ensureColumn('payments', 'redirect_url', 'TEXT');
   ensureColumn('trips', 'promo_code', 'TEXT');
   ensureColumn('trips', 'promo_percent', "REAL NOT NULL DEFAULT 0");
+  ensureColumn('trips', 'passenger_name', 'TEXT');
+  ensureColumn('trips', 'passenger_phone', 'TEXT');
   ensureColumn('payout_requests', 'provider_reference', 'TEXT');
   ensureColumn('payout_requests', 'provider_status', 'TEXT');
   ensureColumn('payout_requests', 'provider_paid_at', 'TEXT');

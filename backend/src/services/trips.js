@@ -138,7 +138,7 @@ function toUtcIso(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null }) {
+async function createTrip({ customerId, pickup, destination, priceModel = 'distance_time', paymentMethod = 'cash', scheduledAt = null, promoCode = null, passengerName = null, passengerPhone = null }) {
   // `getDriver()` is the platform rate card (representative pricing + booking
   // preview). Actual dispatch goes to every online approved driver.
   const driver = repo.getDriver();
@@ -207,6 +207,8 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
     promoPercent: discountPercent,
     priceModel,
     paymentMethod,
+    passengerName,
+    passengerPhone,
   });
 
   // Consume the promo use (only on immediate bookings; scheduled trips consume

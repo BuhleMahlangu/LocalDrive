@@ -165,7 +165,7 @@ function customerRoutes({ notify }) {
           code: 'DOCUMENTS_REQUIRED',
         });
       }
-      const { pickup, destination, priceModel, paymentMethod, scheduledAt, promoCode } = req.body;
+      const { pickup, destination, priceModel, paymentMethod, scheduledAt, promoCode, passengerName, passengerPhone } = req.body;
       if (paymentMethod !== 'cash' && paymentMethod !== 'card') {
         return res.status(400).json({ error: 'Invalid payment method' });
       }
@@ -198,6 +198,8 @@ function customerRoutes({ notify }) {
         paymentMethod,
         scheduledAt: scheduledAt || null,
         promoCode: promo?.promo?.code || null,
+        passengerName: passengerName || null,
+        passengerPhone: passengerPhone || null,
       });
 
       // Track recent destinations for the one-tap rebook bar.

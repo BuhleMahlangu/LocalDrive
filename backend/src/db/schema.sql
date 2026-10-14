@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS trips (
   cancel_reason  TEXT,
   cancel_actor   TEXT,          -- 'customer' | 'driver' | 'system'
   scheduled_at   TIMESTAMPTZ,
+  passenger_name  TEXT,
+  passenger_phone TEXT,
   requested_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   accepted_at    TIMESTAMPTZ,
   started_at     TIMESTAMPTZ,

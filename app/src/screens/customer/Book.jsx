@@ -47,6 +47,8 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
   const [dest, setDest] = useState(presetDest || null);
   const [you, setYou] = useState(null); // customer's live location (red dot, for nearest-spot picking)
   const [pickupNote, setPickupNote] = useState('');
+  const [passengerName, setPassengerName] = useState('');
+  const [passengerPhone, setPassengerPhone] = useState('');
   const [destNote, setDestNote] = useState(
     presetDest?.note || (presetDest ? '' : ''),
   );
@@ -390,6 +392,8 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       },
       priceModel: 'distance_time',
       paymentMethod,
+      passengerName: passengerName.trim() || null,
+      passengerPhone: passengerPhone.trim() || null,
       // datetime-local gives a naive local wall-clock string ("2026-10-07T14:00").
       // The scheduler runs on UTC, so pin it to an exact instant (with the
       // browser's timezone) before sending — otherwise SAST rides release 2h late.
@@ -777,6 +781,18 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
                 <input type="datetime-local" value={scheduleAt} min={defaultSchedule()} onChange={(e) => setScheduleAt(e.target.value)} />
               </div>
             )}
+
+            <details className="passenger-details" style={{ margin: '8px 0' }}>
+              <summary className="hint" style={{ cursor: 'pointer' }}>Booking for someone else? (optional)</summary>
+              <label style={{ display: 'block', marginTop: '8px' }}>
+                Passenger name
+                <input type="text" value={passengerName} onChange={(e) => setPassengerName(e.target.value)} placeholder="Thandi" />
+              </label>
+              <label style={{ display: 'block' }}>
+                Passenger phone
+                <input type="tel" value={passengerPhone} onChange={(e) => setPassengerPhone(e.target.value)} placeholder="+27..." />
+              </label>
+            </details>
 
             <div className="pay-choice">
               <button type="button" className={paymentMethod === 'cash' ? 'pay-opt active' : 'pay-opt'} onClick={() => setPaymentMethod('cash')}>{t('book.payCash')}</button>
