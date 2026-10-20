@@ -181,8 +181,8 @@ export default function Apply({ user, onUserUpdate, onLogout, onSwitchRole }) {
               <h3>What happens next?</h3>
               <p className="hint" style={{ margin: '6px 0 0' }}>
                 1. We review your ID and proof of residence. 2. Once approved you'll
-                go online from the driver home. 3. You keep 90% of every fare, the
-                platform keeps a 10% commission.
+                go online from the driver home. 3. Activate a monthly subscription —
+                you keep 100% of every fare, with no per-ride commission.
               </p>
             </div>
           </>

@@ -87,7 +87,7 @@ function driverRoutes({ notify }) {
   router.use(authRequired(['driver', 'admin']));
   router.use(approvedDriverOnly);
 
-  // Wallet balance (available to withdraw vs commission owed to the platform).
+  // Wallet balance (available to withdraw).
   router.get('/wallet', (req, res) => {
     res.json({ wallet: repo.getWallet(req.user.id) });
   });
@@ -418,11 +418,10 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // ----- Admin settings (owner only — they move the platform fee and the
-  // auto-offline behaviour everyone depends on) -----
+  // ----- Admin settings (owner only — auto-offline behaviour everyone
+  // depends on) -----
   router.get('/settings', adminOnly, (_req, res) => {
     const defaults = {
-      platform_fee_percent: config.platformFeePercent,
       auto_offline_grace_ms: config.autoOfflineGraceMs,
     };
     const saved = {};
@@ -432,14 +431,7 @@ function driverRoutes({ notify }) {
 
   router.put('/settings', adminOnly, (req, res, next) => {
     try {
-      const { platform_fee_percent, auto_offline_grace_ms } = req.body || {};
-      if (platform_fee_percent != null) {
-        const n = parseFloat(platform_fee_percent);
-        if (!Number.isFinite(n) || n < 0 || n > 100) {
-          return res.status(400).json({ error: 'Platform fee must be a percentage (0-100)' });
-        }
-        repo.setSetting('platform_fee_percent', n);
-      }
+      const { auto_offline_grace_ms } = req.body || {};
       if (auto_offline_grace_ms != null) {
         const n = parseInt(auto_offline_grace_ms, 10);
         if (!Number.isFinite(n) || n < 1000 || n > 3600000) {

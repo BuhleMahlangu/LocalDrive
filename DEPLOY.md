@@ -187,8 +187,8 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
   first tap) — do not expect sound in the background tab or phone locked.
 - Don't change `autoOfflineGraceMs` in code — use the **Admin** tab in the driver app
   (writes to the fast `settings` table). Changed values are picked up by the
-  backend scheduler, so no restart needed. (`platformFeePercent` is legacy: rides
-  no longer carry a commission — see the subscription model below.)
+  backend scheduler, so no restart needed. (Rides no longer carry a commission —
+  see the subscription model below.)
 - Web push only works on HTTPS with a service worker — the frontend build wires
   push handlers into the generated `sw.js` automatically.
 - **OTP delivery** uses whichever provider is configured (WhatsApp Cloud API

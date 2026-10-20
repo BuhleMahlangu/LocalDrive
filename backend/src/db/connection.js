@@ -74,12 +74,10 @@ CREATE TABLE IF NOT EXISTS driver_documents (
   rejection_reason     TEXT
 );
 
--- Driver wallet ledger. available = money the driver can withdraw; owed = the
--- platform's commission on cash trips, to be settled by the driver.
+-- Driver wallet ledger. available = money the driver can withdraw.
 CREATE TABLE IF NOT EXISTS driver_wallets (
   driver_id       TEXT PRIMARY KEY,
   available_cents INTEGER NOT NULL DEFAULT 0,
-  owed_cents      INTEGER NOT NULL DEFAULT 0,
   updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -345,7 +343,6 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   CREATE TABLE IF NOT EXISTS driver_wallets (
     driver_id       TEXT PRIMARY KEY,
     available_cents INTEGER NOT NULL DEFAULT 0,
-    owed_cents      INTEGER NOT NULL DEFAULT 0,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
   -- Driver subscription: freemium model. The owner (config.driverPhone) is

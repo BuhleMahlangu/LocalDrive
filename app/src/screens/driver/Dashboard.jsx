@@ -795,9 +795,8 @@ export default function Dashboard({ user, onUserUpdate }) {
           <h3>Wallet</h3>
           <div className="earn-row">
             <div className="earn-box"><span className="earn-num">{formatRand((wallet.availableCents || 0) / 100)}</span><span className="earn-label">Ready to withdraw</span></div>
-            <div className="earn-box"><span className="earn-num">{formatRand((wallet.owedCents || 0) / 100)}</span><span className="earn-label">Owed to platform</span></div>
           </div>
-          <p className="hint">Card trips pay into this wallet; cash trips add a platform fee you owe. Payouts are coming soon.</p>
+          <p className="hint">Card trips pay into this wallet. Payouts are coming soon.</p>
         </div>
       )}
     </div>

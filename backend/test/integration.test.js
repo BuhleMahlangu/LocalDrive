@@ -539,18 +539,16 @@ test('driver admin settings round-trip', async () => {
 
   const get = await api('GET', '/api/driver/settings', null, admin);
   assert.equal(get.status, 200);
-  assert.ok('platform_fee_percent' in get.json.settings);
   assert.ok('auto_offline_grace_ms' in get.json.settings);
 
   const put = await api('PUT', '/api/driver/settings', {
-    platform_fee_percent: 12.5, auto_offline_grace_ms: 120000,
+    auto_offline_grace_ms: 120000,
   }, admin);
   assert.equal(put.status, 200);
   const saved = Object.fromEntries(put.json.saved.map((r) => [r.key, r.value]));
-  assert.equal(Number(saved.platform_fee_percent), 12.5);
   assert.equal(Number(saved.auto_offline_grace_ms), 120000);
 
-  const bad = await api('PUT', '/api/driver/settings', { platform_fee_percent: 150 }, admin);
+  const bad = await api('PUT', '/api/driver/settings', { auto_offline_grace_ms: 10 }, admin);
   assert.equal(bad.status, 400);
 });
 

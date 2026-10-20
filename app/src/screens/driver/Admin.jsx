@@ -9,7 +9,7 @@ import decodePolyline from '../../lib/polyline.js';
 //  - Records:  trip audit trail — search any rider/driver by name so the owner
 //              can reconstruct "who was with whom, when, and where".
 //  - Spots:    the preset pickup spots every customer and driver sees on the map.
-//  - Settings: platform commission + the automatic offline idle timer.
+//  - Settings: the automatic offline idle timer.
 export default function Admin() {
   const [tab, setTab] = useState('drivers');
 
@@ -499,7 +499,6 @@ function SpotsTab() {
 }
 
 function SettingsTab() {
-  const [fee, setFee] = useState('');
   const [graceMs, setGraceMs] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -509,7 +508,6 @@ function SettingsTab() {
     api('/driver/settings')
       .then((r) => {
         const s = r.settings || {};
-        setFee(String(s.platform_fee_percent ?? configDefaultFee));
         setGraceMs(String(Math.round((s.auto_offline_grace_ms ?? 600000) / 60000)));
       })
       .catch(() => setError('Could not load settings'));
@@ -524,7 +522,6 @@ function SettingsTab() {
       await api('/driver/settings', {
         method: 'PUT',
         body: {
-          platform_fee_percent: Number(fee),
           auto_offline_grace_ms: Number(graceMs) * 60 * 1000,
         },
       });
@@ -536,28 +533,11 @@ function SettingsTab() {
     }
   }
 
-  const feeNum = Number(fee);
-  const exampleFare = 100;
-  const platformShare = feeNum >= 0 ? ((feeNum / 100) * exampleFare).toFixed(2) : null;
-
   return (
     <>
       <p className="subtitle">Business rules applied to every ride.</p>
 
       <form className="card form-card" onSubmit={save}>
-        <div className="field">
-          <span className="field-label">Platform commission (%)</span>
-          <input
-            type="number" min="0" max="100" step="0.5"
-            value={fee}
-            onChange={(e) => setFee(e.target.value)}
-            placeholder={String(configDefaultFee)}
-          />
-          <p className="hint">
-            Commission the platform keeps from each trip (after Yoco's card fee). For a {formatRand(exampleFare)} trip this is {platformShare != null ? formatRand(Number(platformShare)) : '—'}.
-          </p>
-        </div>
-
         <div className="field">
           <span className="field-label">Go offline after (minutes)</span>
           <input
@@ -849,7 +829,7 @@ function TripAudit({ trip }) {
             {pay.paymentIntentId ? ` · intent ${pay.paymentIntentId}` : ''}
           </p>
           <p className="hint" style={{ margin: '4px 0 0' }}>
-            Driver payout {formatRand(pay.driverPayoutCents / 100)} · platform fee {formatRand(pay.platformFeeCents / 100)}
+            Driver payout {formatRand(pay.driverPayoutCents / 100)}
           </p>
         </div>
       )}
@@ -886,7 +866,6 @@ function fmt(iso) {
   return new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
-const configDefaultFee = 10;
 function PayoutsTab() {
   const [status, setStatus] = useState('pending');
   const [payouts, setPayouts] = useState([]);
@@ -1129,7 +1108,6 @@ function OpsTab() {
               <th>Acceptance</th>
               <th>Rating</th>
               <th>Available</th>
-              <th>Owed</th>
             </tr>
           </thead>
           <tbody>
@@ -1143,7 +1121,6 @@ function OpsTab() {
                 <td>{d.analytics?.acceptanceRate ?? 100}%</td>
                 <td>{d.user.rating != null ? d.user.rating.toFixed(1) : '�'}</td>
                 <td>{formatRand((d.wallet?.availableCents || 0) / 100)}</td>
-                <td>{formatRand((d.wallet?.owedCents || 0) / 100)}</td>
               </tr>
             ))}
           </tbody>

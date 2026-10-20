@@ -360,14 +360,6 @@ async function confirmFare(tripId, customerId) {
   return repo.updateTrip(tripId, { fare_confirmed_at: now() });
 }
 
-// Platform fee is runtime-configurable via the admin settings page, falling
-// back to the env-configured default.
-function platformFeePercent() {
-  const setting = repo.getSetting('platform_fee_percent');
-  const parsed = parseFloat(setting);
-  return Number.isFinite(parsed) ? parsed : config.platformFeePercent;
-}
-
 // Complete the trip: final fare = estimate (distance/time model). Create a payment.
 async function completeTrip(tripId, driverId, { actualDistanceKm, actualDurationMin, tipAmount } = {}) {
   const trip = repo.getTripById(tripId);
@@ -552,14 +544,6 @@ function withCustomerInfo(trip) {
   return trip;
 }
 
-// Attach driver contact info to a trip for the customer's view.
-function withDriverInfo(trip) {
-  if (!trip || !trip.driverId) return trip;
-  const d = repo.getUserById(trip.driverId);
-  if (d) trip.driverPublic = publicDriver(d);
-  return trip;
-}
-
 module.exports = {
   createTrip,
   checkAvailabilityForPickup,
@@ -573,10 +557,8 @@ module.exports = {
   rateTrip,
 activateScheduledTrip,
   releaseScheduledTrip,
-  platformFeePercent,
   validatePromo,
   publicDriver,
   withCustomerInfo,
-  withDriverInfo,
   getRoute,
 };

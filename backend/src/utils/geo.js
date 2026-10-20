@@ -27,21 +27,6 @@ function estimatedRoadKm(la1, lo1, la2, lo2) {
   return direct * 1.3; // roads are ~30% longer than crow-flies in urban areas
 }
 
-// Distance from a point to a line segment (lat/lng), in km.
-function distToSegmentKm(px, py, ax, ay, bx, by) {
-  const dLat = bx - ax;
-  const dLng = by - ay;
-  if (dLat === 0 && dLng === 0) return haversineKm(px, py, ax, ay);
-
-  const t = Math.max(0, Math.min(1,
-    ((px - ax) * dLat + (py - ay) * dLng) / (dLat * dLat + dLng * dLng),
-  ));
-
-  const cx = ax + t * dLat;
-  const cy = ay + t * dLng;
-  return haversineKm(px, py, cx, cy);
-}
-
 // Estimate whether a driver is within a service radius of the pickup, already on the road.
 function isWithinService(serviceKm, driverLat, driverLng, pickupLat, pickupLng, radiusKm = 50) {
   const dist = haversineKm(driverLat, driverLng, pickupLat, pickupLng);
@@ -53,6 +38,5 @@ module.exports = {
   now,
   haversineKm,
   estimatedRoadKm,
-  distToSegmentKm,
   isWithinService,
 };

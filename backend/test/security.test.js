@@ -137,7 +137,7 @@ test('admin-only driver surfaces reject an approved non-owner driver', async () 
     ['GET', '/api/driver/disputes'],
     ['POST', '/api/driver/disputes/whatever/resolve'],
   ]) {
-    const blocked = await api(method, path, { platform_fee_percent: 0 }, other);
+    const blocked = await api(method, path, { auto_offline_grace_ms: 120000 }, other);
     assert.equal(blocked.status, 403, `${method} ${path} must require admin`);
   }
 

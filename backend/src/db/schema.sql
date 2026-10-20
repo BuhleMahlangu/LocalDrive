@@ -44,7 +44,6 @@ CREATE TABLE IF NOT EXISTS driver_documents (
 CREATE TABLE IF NOT EXISTS driver_wallets (
   driver_id       TEXT PRIMARY KEY REFERENCES users(id),
   available_cents INTEGER NOT NULL DEFAULT 0,
-  owed_cents      INTEGER NOT NULL DEFAULT 0,
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -181,7 +180,7 @@ CREATE TABLE IF NOT EXISTS pickup_spots (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Runtime settings (platform fee %, auto-offline grace) editable from Admin.
+-- Runtime settings (auto-offline grace) editable from Admin.
 CREATE TABLE IF NOT EXISTS settings (
   key        TEXT PRIMARY KEY,
   value      TEXT,

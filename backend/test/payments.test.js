@@ -224,10 +224,7 @@ test('card trip: hosted checkout, confirm, and refund flow', async () => {
   assert.equal(checkout.json.paid, false);
 
   // Monetisation is via driver subscriptions now: no per-ride commission, so
-  // the driver keeps the full fare regardless of the legacy platform_fee_percent
-  // setting (which is no longer applied to rides).
-  repo.setSetting('platform_fee_percent', '25');
-
+  // the driver keeps the full fare.
   // Simulate the customer finishing the hosted page, then confirm.
   completeCheckout(checkoutId);
   const confirm = await api('POST', '/api/payments/confirm', { tripId }, customer);
@@ -250,8 +247,6 @@ test('card trip: hosted checkout, confirm, and refund flow', async () => {
   assert.equal(refund.json.refunded, true);
   assert.ok(refund.json.refund.refundId.startsWith('rf_'), 'Yoco refund id returned');
   assert.equal(repo.getPaymentByTrip(tripId).status, 'refunded');
-
-  repo.setSetting('platform_fee_percent', null);
 });
 
 test('signed webhook marks a payment succeeded (double-check with Yoco)', async () => {

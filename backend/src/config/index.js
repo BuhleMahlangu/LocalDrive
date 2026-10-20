@@ -25,7 +25,6 @@ const config = {
     privateKey: process.env.VAPID_PRIVATE_KEY,
     subject: process.env.VAPID_SUBJECT || 'mailto:driver@drivelocal.co.za',
   },
-  platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT || '10'),
   // Grace period before auto-offlining a disconnected driver. Page refreshes,
   // brief network blips and dev restarts reconnect within a few seconds, so we
   // wait before assuming the driver actually went away.

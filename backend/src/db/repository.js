@@ -302,13 +302,6 @@ module.exports = {
     return this.getUserById(id);
   },
 
-  promoteToDriver(id) {
-    db.prepare(
-      "UPDATE users SET role = 'driver', driver_status = 'approved', is_online = 0, updated_at = ? WHERE id = ?",
-    ).run(now(), id);
-    return this.getUserById(id);
-  },
-
   // A customer who chooses "I'm the driver" applies to drive: keep the same row
   // (and history) but the role becomes a pending driver applicant.
   convertToDriverApplicant(id) {
@@ -375,12 +368,6 @@ module.exports = {
     );
   },
 
-  listDriverApplications() {
-    return db.prepare(
-      'SELECT * FROM driver_documents ORDER BY submitted_at DESC',
-    ).all().map((r) => this.mapApplication(r));
-  },
-
   // Identity completeness for a driver: both an ID copy and a selfie must be
   // on file before they may go online or accept rides (safety gate).
   hasDriverIdentity(driverId) {
@@ -433,7 +420,7 @@ module.exports = {
   // Build the full admin-facing driver record: account + application + wallet.
   listDriversForAdmin() {
     const rows = db.prepare(
-      `SELECT u.*, w.available_cents, w.owed_cents
+      `SELECT u.*, w.available_cents
        FROM users u
        LEFT JOIN driver_wallets w ON w.driver_id = u.id
        WHERE u.role IN ('admin','driver')
@@ -447,7 +434,6 @@ module.exports = {
         application: app,
         wallet: {
           availableCents: row.available_cents || 0,
-          owedCents: row.owed_cents || 0,
         },
         subscription: this.getSubscription(row.id),
       };
@@ -473,11 +459,11 @@ module.exports = {
 
   getWallet(driverId) {
     const row = db.prepare(
-      'SELECT available_cents, owed_cents, updated_at FROM driver_wallets WHERE driver_id = ?',
+      'SELECT available_cents, updated_at FROM driver_wallets WHERE driver_id = ?',
     ).get(driverId);
     return row
-      ? { availableCents: row.available_cents, owedCents: row.owed_cents, updatedAt: row.updated_at }
-      : { availableCents: 0, owedCents: 0, updatedAt: null };
+      ? { availableCents: row.available_cents, updatedAt: row.updated_at }
+      : { availableCents: 0, updatedAt: null };
   },
 
   // ---------- Driver subscriptions (freemium) ----------
@@ -715,11 +701,11 @@ module.exports = {
   },
 
   // Move given driver_id's wallet by deltas (cents, can be negative).
-  adjustWallet(driverId, { availableCents = 0, owedCents = 0 }) {
+  adjustWallet(driverId, { availableCents = 0 }) {
     db.prepare(
       `UPDATE driver_wallets SET available_cents = available_cents + ?,
-        owed_cents = owed_cents + ?, updated_at = ? WHERE driver_id = ?`,
-    ).run(availableCents, owedCents, now(), driverId);
+        updated_at = ? WHERE driver_id = ?`,
+    ).run(availableCents, now(), driverId);
     return this.getWallet(driverId);
   },
 
@@ -744,14 +730,6 @@ module.exports = {
     ).get(driverId);
     if (!row) return null;
     return { lat: row.lat, lng: row.lng, heading: row.heading, accuracy: row.accuracy, timestamp: row.timestamp };
-  },
-
-  getDriverLocationHistory(driverId, limit = 200) {
-    return db.prepare(
-      'SELECT * FROM driver_locations WHERE driver_id = ? ORDER BY timestamp DESC LIMIT ?',
-    ).all(driverId, limit).map((r) => ({
-      lat: r.lat, lng: r.lng, heading: r.heading, timestamp: r.timestamp,
-    })).reverse();
   },
 
   // ---------- OTP ----------
@@ -1060,10 +1038,6 @@ module.exports = {
       db.prepare(`UPDATE trips SET ${updates.join(', ')} WHERE id = ?`).run(...vals, id);
     }
     return this.getTripById(id);
-  },
-
-  setTripStatus(id, status) {
-    return this.updateTrip(id, { status });
   },
 
   // ---------- Payments ----------

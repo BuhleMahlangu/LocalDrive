@@ -230,7 +230,6 @@ components:
       type: object
       properties:
         availableCents: { type: integer }
-        owedCents: { type: integer }
         updatedAt: { type: string, nullable: true }
     Application:
       type: object
