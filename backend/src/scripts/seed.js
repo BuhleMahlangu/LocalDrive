@@ -63,10 +63,17 @@ function main() {
 
   const location = repo.getDriverLocation(driver.id);
   if (!location) {
-    // Default driver start position: Thubelihle, Kriel (Mpumalanga) — the app's
-    // service area. Kept here so bookings in the area pass the service check.
-    repo.upsertDriverLocation(driver.id, { lat: -26.2155, lng: 29.2916, heading: 0, accuracy: 15 });
-    console.log('Driver location seeded near Thubelihle, Kriel.');
+    // Seed the driver's start position from the configured service area so the
+    // first booking inside the area passes the service check. Skipped when the
+    // owner hasn't set an area yet — the driver's real GPS takes over the moment
+    // they go online.
+    const area = repo.getServiceArea();
+    if (area.lat != null && area.lng != null) {
+      repo.upsertDriverLocation(driver.id, { lat: area.lat, lng: area.lng, heading: 0, accuracy: 15 });
+      console.log(`Driver location seeded at the service area${area.name ? ` (${area.name})` : ''}.`);
+    } else {
+      console.log('No service area configured — driver location will come from GPS.');
+    }
   }
 
   console.log('\nSeeded demo accounts:');

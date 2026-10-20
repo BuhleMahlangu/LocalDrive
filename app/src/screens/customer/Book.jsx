@@ -7,24 +7,11 @@ import decodePolyline from '../../lib/polyline.js';
 import { nearestPoint } from '../../lib/geo.js';
 import { getOrFetch } from '../../lib/offlineCache.js';
 import { useI18n } from '../../i18n.jsx';
-
-// The app serves the Kriel / Thubelihle area (Mpumalanga, South Africa), where
-// many places don't have usable street names. Map centre defaults to that area
-// and the flow is built around landmarks + a free-text "describe this place" note
-// so the customer and driver can find each other easily.
-const AREA_CENTER = { lat: -26.2155, lng: 29.2916 }; // Thubelihle, Kriel
+import { useServiceArea } from '../../lib/serviceArea.js';
 
 // How long a pin must sit still before we price the trip. Long enough that
 // fine-tuning a pin costs one request, short enough to feel instant.
 const ESTIMATE_DEBOUNCE_MS = 400;
-
-// The app only operates inside this town. Allowing the map to be panned out into
-// the ocean serves no purpose and only wastes tile requests, so the view is
-// bounded generously around the service area.
-const AREA_BOUNDS = [
-  [AREA_CENTER.lat - 0.9, AREA_CENTER.lng - 0.9],
-  [AREA_CENTER.lat + 0.9, AREA_CENTER.lng + 0.9],
-];
 
 // Common landmarks used to describe informal places / drop a pin quickly.
 const LANDMARKS = [
@@ -43,6 +30,7 @@ const LANDMARKS = [
 // can actually be seen.
 export default function Book({ onBack, onRequest, presetDest, visible = true }) {
   const { t } = useI18n();
+  const serviceArea = useServiceArea();
   const [pickup, setPickup] = useState(null);
   const [dest, setDest] = useState(presetDest || null);
   const [you, setYou] = useState(null); // customer's live location (red dot, for nearest-spot picking)
@@ -152,7 +140,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
       .catch(() => {});
   }, []);
 
-  // Preset pickup spots (seeded server-side for the Kriel / Thubelihle area).
+  // Preset pickup spots (owner-managed in Admin → Spots).
   // Also cached offline-first, but the cached copy must not pin the list: spots
   // an admin adds later have to reach the customer without a re-login.
   useEffect(() => {
@@ -484,10 +472,27 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
 
   const fmtMeters = (m) => (m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`);
 
-  // Keep the map centred on the whole Kriel / Thubelihle service area so the
-  // customer can see the surroundings when placing pins. Autofit frames the
-  // route once both pins are down.
-  const mapCenter = [AREA_CENTER.lat, AREA_CENTER.lng];
+  // Centre the map on the configured service area so the customer sees the
+  // surroundings when placing pins. If the owner hasn't set one (or the device
+  // location is known and there's no area), fall back sensibly. Autofit frames
+  // the route once both pins are down.
+  const hasArea = serviceArea.lat != null && serviceArea.lng != null;
+  const mapCenter = hasArea
+    ? [serviceArea.lat, serviceArea.lng]
+    : you
+      ? [you.lat, you.lng]
+      : null;
+  // Bound the view generously around the service area radius so the map can't be
+  // panned off into the ocean (wasted tiles). Only when an area is configured.
+  const mapBounds = hasArea
+    ? (() => {
+        const d = Math.max(0.05, (serviceArea.radiusKm || 30) / 111);
+        return [
+          [serviceArea.lat - d, serviceArea.lng - d],
+          [serviceArea.lat + d, serviceArea.lng + d],
+        ];
+      })()
+    : null;
 
   const gpsPin = (p) => `${Number(p.lat).toFixed(6)},${Number(p.lng).toFixed(6)}`;
 
@@ -670,7 +675,7 @@ export default function Book({ onBack, onRequest, presetDest, visible = true }) 
             onMapClick={onMapClick}
             onSpotClick={onSpotClick}
             autofitSpots={!(pickup && dest)}
-            maxBounds={AREA_BOUNDS}
+            maxBounds={mapBounds}
           />
         )}
         {!pickup ? (

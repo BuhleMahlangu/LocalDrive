@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS saved_places (
 );
 CREATE INDEX IF NOT EXISTS idx_saved_places_user ON saved_places(user_id);
 
--- Preset pickup spots for the Kriel / Thubelihle service area (admin-managed).
+-- Preset pickup spots for the service area (admin-managed; starts empty).
 CREATE TABLE IF NOT EXISTS pickup_spots (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,

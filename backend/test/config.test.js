@@ -1,7 +1,7 @@
 // Production startup guardrails around OTP delivery: with no SMS provider and
-// no SMTP configured, production must refuse to start unless the deployment
-// explicitly opts into the fixed 123456 code (closed beta).
-
+// no SMTP configured, production must refuse to start. There is no fixed-code
+// fallback, so a delivery path is mandatory.
+ 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -24,7 +24,8 @@ const BASE = {
   SMTP_HOST: '',
   SMTP_USER: '',
   SMTP_PASS: '',
-  ALLOW_FIXED_OTP: '',
+  SERVICE_AREA_LAT: '-26.2155',
+  SERVICE_AREA_LNG: '29.2916',
 };
 
 function loadConfig(overrides = {}) {
@@ -61,10 +62,11 @@ test('production refuses to start with SMS_PROVIDER set but no credentials', () 
   assert.match(error.message, /No OTP delivery path configured/);
 });
 
-test('ALLOW_FIXED_OTP=true lets a closed beta run the fixed code', () => {
-  const { config, error } = loadConfig({ ALLOW_FIXED_OTP: 'true' });
-  assert.equal(error, undefined);
-  assert.equal(config.nodeEnv, 'production');
+test('no fixed-code escape hatch: production still refuses without a delivery path', () => {
+  // ALLOW_FIXED_OTP is no longer honoured — there is no fixed code at all.
+  const { error } = loadConfig({ ALLOW_FIXED_OTP: 'true' });
+  assert.ok(error, 'config should throw');
+  assert.match(error.message, /No OTP delivery path configured/);
 });
 
 test('production starts once a provider is fully configured', () => {
@@ -79,4 +81,13 @@ test('production starts once a provider is fully configured', () => {
     const { error } = loadConfig(overrides);
     assert.equal(error, undefined, `should start with ${JSON.stringify(overrides)}`);
   }
+});
+
+test('production refuses to start with no service-area centre', () => {
+  const { error } = loadConfig({
+    SMS_PROVIDER: 'clicksend', CLICKSEND_USERNAME: 'u', CLICKSEND_API_KEY: 'k',
+    SERVICE_AREA_LAT: '0', SERVICE_AREA_LNG: '0',
+  });
+  assert.ok(error, 'config should throw');
+  assert.match(error.message, /SERVICE_AREA_LAT and SERVICE_AREA_LNG/);
 });

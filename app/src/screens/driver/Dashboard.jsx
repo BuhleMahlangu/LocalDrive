@@ -6,8 +6,7 @@ import { api, apiUpload, connectSocket, formatRand, toTel, toWhatsApp, validateS
 import decodePolyline from '../../lib/polyline.js';
 import { playRequestChime, playSuccessChime } from '../../lib/alert.js';
 import { sendSos } from '../../lib/emergency.js';
-
-const AREA_CENTER = [-26.2155, 29.2916];
+import { useServiceArea } from '../../lib/serviceArea.js';
 
 // How often the driver actually publishes a fix, and how far they must have
 // moved for it to be worth sending. A moving phone reports GPS at 1 Hz or
@@ -25,6 +24,7 @@ function gpsErrorMessage(err) {
 }
 
 export default function Dashboard({ user, onUserUpdate }) {
+  const serviceArea = useServiceArea();
   const [online, setOnline] = useState(!!user.isOnline);
   const [onlineDriverCount, setOnlineDriverCount] = useState(null);
   const [pending, setPending] = useState(null);
@@ -703,7 +703,9 @@ export default function Dashboard({ user, onUserUpdate }) {
 
       <div className="map-wrap">
         <Map
-          center={AREA_CENTER}
+          center={serviceArea.lat != null && serviceArea.lng != null
+            ? [serviceArea.lat, serviceArea.lng]
+            : driverLoc ? [driverLoc.lat, driverLoc.lng] : null}
           markers={mapMarkers}
           routes={mapRoutes}
           autofit={!!(mapTrip?.pickup && mapTrip?.destination)}

@@ -99,7 +99,7 @@ export default function Revenue() {
       <div className="card">
         <h3>🏪 Local business ads</h3>
         <p className="hint">
-          Coming soon: promote local Kriel & Thubelihle businesses (spaza shops, mechanics, salons)
+          Coming soon: promote local businesses (spaza shops, mechanics, salons)
           on the landing page for a small monthly fee. This is where your second income line will live.
         </p>
         <p className="hint" style={{ color: 'var(--muted)', fontSize: '0.8rem' }}>

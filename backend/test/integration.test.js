@@ -17,9 +17,15 @@ const repo = require('../src/db/repository');
 const { createApp } = require('../src/app');
 const { signToken } = require('../src/middleware');
 
-// Keep test output clean: never actually send an SMS.
+// Tests never actually send an SMS: capture the code the way a real recipient
+// would receive it, so logins use the same random OTP the server generated.
 const sms = require('../src/services/sms');
-sms.send = async () => ({ dev: true });
+const sentOtps = new Map();
+sms.send = async ({ to, body }) => {
+  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
+  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
+  return { logged: true };
+};
 
 // The API routes call `notify.*` for realtime pushes; a no-op stub is enough.
 const notify = {
@@ -41,6 +47,15 @@ before(async () => {
   });
   const { port } = server.address();
   BASE = `http://127.0.0.1:${port}`;
+
+  // Promo codes and pickup spots are no longer seeded — the tests create the
+  // fixtures they exercise so a real deployment can start from an empty DB.
+  if (!repo.getPromoByCode('WELCOME10')) {
+    repo.createPromo({ code: 'WELCOME10', discountPercent: 10, maxUses: 100 });
+  }
+  if (!repo.listPickupSpots().length) {
+    repo.createPickupSpot({ name: 'Test Spot', category: 'town', address: 'Main road', lat: -26.2148, lng: 29.2913, sort: 1 });
+  }
 });
 
 after(() => new Promise((resolve) => {
@@ -87,16 +102,17 @@ function seedCustomerIdentity(userId) {
   });
 }
 
-// Request an OTP, verify it with the dev/test convenience code, and return the
-// issued token. (Test env uses the fixed code '123456'; the DB only holds a hash.)
+// Request an OTP, read the code the test captured, and return the issued token.
 async function login(phone, role, name, email) {
   const req = await api('POST', '/api/auth/otp/request', { phone, role });
   assert.equal(req.status, 200, `otp request ok for ${phone} (${role})`);
   const normalized = phone.replace(/[^+\d]/g, '');
   const row = repo.getOtp(normalized);
   assert.ok(row, `otp row stored for ${phone}`);
+  const code = sentOtps.get(normalized);
+  assert.ok(code, `otp code captured for ${phone}`);
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code: '123456', role, name, email,
+    phone, code, role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
   assert.equal(res.json.success, true);
@@ -152,7 +168,6 @@ test('public pickup spots are listed', async () => {
   const res = await api('GET', '/api/pickup-spots');
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.json.spots) && res.json.spots.length > 0);
-  assert.equal(res.json.spots[0].id, 'spot_kriel_town');
 });
 
 test('pickup spot management is admin-only (CRUD on /api/admin/spots)', async () => {
@@ -166,8 +181,7 @@ test('pickup spot management is admin-only (CRUD on /api/admin/spots)', async ()
   assert.equal(forbidden.status, 403);
   const list = await api('GET', '/api/admin/spots', null, admin.token);
   assert.equal(list.status, 200);
-  const ids = list.json.spots.map((s) => s.id);
-  assert.ok(ids.includes('spot_kriel_town'), 'seeded spot visible to admin');
+  assert.ok(Array.isArray(list.json.spots) && list.json.spots.length > 0, 'admin sees the spots that exist');
 
   // Create requires name + numeric lat/lng.
   const bad = await api('POST', '/api/admin/spots', { name: 'Broken' }, admin.token);
@@ -229,7 +243,7 @@ test('auth: a stranger can apply as a driver (pending)', async () => {
   const row = repo.getOtp(normalized);
   assert.ok(row, 'otp row stored');
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone: normalized, code: '123456', role: 'driver',
+    phone: normalized, code: sentOtps.get(normalized), role: 'driver',
   });
   assert.equal(res.status, 200);
   assert.equal(res.json.user.role, 'driver');

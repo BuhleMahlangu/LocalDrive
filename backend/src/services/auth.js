@@ -40,17 +40,16 @@ async function requestOtp({ phone, role: _role, email: requestedEmail }) {
     throw err;
   }
 
-  // Deliver a real random one-time code: SMS to the requesting number when a
-  // provider is configured, else email (SMTP) if we have an address, else the
-  // interim fixed dev code. We never log the plaintext code once a real
-  // provider is wired in.
+  // Always issue a real random one-time code. SMS goes to the requesting number
+  // when a provider is configured, else email (SMTP) if we have an address; with
+  // neither, sms.send logs the code to the server console in development only
+  // (production refuses to start without a delivery path — see config/index.js).
   const existingUser = repo.getUserByPhone(normalized) || repo.getUserByPhone(normalized, _role === 'driver' ? 'driver' : 'customer');
   const toEmail = String(requestedEmail || existingUser?.email || '').trim();
 
   const canSms = sms.deliversReal();
   const canEmail = !canSms && email.isConfigured() && !!toEmail;
-  const realDelivery = canSms || canEmail;
-  const code = realDelivery ? String(crypto.randomInt(100000, 1000000)) : '123456';
+  const code = String(crypto.randomInt(100000, 1000000));
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
   repo.saveOtp(normalized, hashOtp(normalized, code), expiresAt);
@@ -68,17 +67,20 @@ async function requestOtp({ phone, role: _role, email: requestedEmail }) {
       html: `<p>Your DriveLocal verification code is <strong>${code}</strong>.</p><p>Valid for ${OTP_TTL_MIN} minutes. Never share it with anyone.</p>`,
     });
   } else {
+    // No SMS/email provider: sms.send() logs the code to the console in
+    // development. Production never reaches here (config refuses to start).
     await sms.send({
       to: normalized,
       body: `DriveLocal: your verification code is ${code}. Valid for ${OTP_TTL_MIN} minutes.`,
     });
   }
 
+  const delivery = canSms ? 'sms' : canEmail ? 'email' : 'console';
   return {
     phone: normalized,
     expiresInSeconds: OTP_TTL_MIN * 60,
-    dev: !realDelivery,
-    delivery: canSms ? 'sms' : canEmail ? 'email' : 'console',
+    dev: delivery === 'console',
+    delivery,
   };
 }
 

@@ -1,10 +1,10 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
 import { uploadIdentity } from './identity.js';
+import { waitForOtp } from './otp.js';
 
-// Owner driver phone + service-area centre (mirrors config on the backend).
+// Owner driver phone (mirrors config on the backend).
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
-const OTP = '123456'; // fixed interim code (no SMS provider integrated yet)
 
 // One-browser-per-role smoke of the core loop: driver online -> customer books
 // -> driver accepts -> customer sees "Driver on the way".
@@ -261,7 +261,8 @@ async function login(page, { role, phone, name = 'Test User' }) {
   await page.locator('form.card button.btn').click();
   await expect(page.locator('form.card button.btn')).toBeDisabled().catch(() => {});
 
-  await page.locator('input[inputmode="numeric"]').fill(OTP);
+  const otp = await waitForOtp(phone);
+  await page.locator('input[inputmode="numeric"]').fill(otp);
   await page.locator('input[placeholder="Thabo"]').fill(name);
   await page.locator('form.card button.btn').click();
 

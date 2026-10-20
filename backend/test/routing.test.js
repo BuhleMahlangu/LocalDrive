@@ -24,7 +24,12 @@ const { signToken } = require('../src/middleware');
 const tripService = require('../src/services/trips');
 
 const sms = require('../src/services/sms');
-sms.send = async () => ({ dev: true });
+const sentOtps = new Map();
+sms.send = async ({ to, body }) => {
+  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
+  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
+  return { logged: true };
+};
 
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
@@ -82,8 +87,10 @@ function seedCustomerIdentity(userId) {
 
 async function login(phone, role, name, email) {
   await api('POST', '/api/auth/otp/request', { phone, role });
+  const code = sentOtps.get(phone.replace(/[^+\d]/g, ''));
+  assert.ok(code, `otp code captured for ${phone}`);
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code: '123456', role, name, email,
+    phone, code, role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
   if (role === 'customer') seedCustomerIdentity(res.json.user.id);

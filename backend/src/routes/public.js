@@ -9,6 +9,12 @@ const repo = require('../db/repository');
 function publicRoutes() {
   const router = Router();
 
+  // Public app config the client needs before/without signing in — currently the
+  // town/service area so the map opens in the right place. Contains no secrets.
+  router.get('/config', (_req, res) => {
+    res.json({ serviceArea: repo.getServiceArea() });
+  });
+
   router.get('/trips/:id/live', (req, res) => {
     const trip = repo.getTripById(req.params.id);
     if (!trip) return res.status(404).json({ error: 'Trip not found' });

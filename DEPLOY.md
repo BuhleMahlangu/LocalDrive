@@ -102,8 +102,13 @@ PORT=4000
 JWT_SECRET=<64+ random chars — the server refuses weak values in production>
 JWT_EXPIRES=30d
 DRIVER_PHONE=+27000000000        # the owner driver — gates driver login
-# OTP delivery — production refuses to start unless a real path is configured
-# (or you explicitly set ALLOW_FIXED_OTP=true for a private pilot).
+# The town the app serves. Set this (or configure it later in Admin → Settings).
+SERVICE_AREA_NAME=Kriel, Mpumalanga
+SERVICE_AREA_LAT=-26.2155
+SERVICE_AREA_LNG=29.2916
+SERVICE_AREA_RADIUS_KM=30
+# OTP delivery — production refuses to start unless a real path is configured.
+# There is no fixed-code fallback.
 # Recommended for SA: WhatsApp Cloud API (free tier / cheapest OTPs).
 SMS_PROVIDER=whatsapp
 WHATSAPP_ACCESS_TOKEN=...
@@ -130,7 +135,7 @@ YOCO_SUCCESS_URL=https://drivelocal.example.co.za/?payment=success
 YOCO_CANCEL_URL=https://drivelocal.example.co.za/?payment=cancelled
 ```
 
-> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It **also refuses to start without a working OTP delivery path** (WhatsApp/SMS or SMTP) unless you set `ALLOW_FIXED_OTP=true` for a private pilot — so you can never accidentally ship the fixed code to real users.
+> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It **also refuses to start without a working OTP delivery path** (WhatsApp/SMS or SMTP) and **without a service-area centre** — so you can never accidentally ship a fixed code to real users or run with the map pointing at nowhere.
 
 ## 8. Enabling card payments (Yoco)
 
@@ -194,8 +199,10 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
 - **OTP delivery** uses whichever provider is configured (WhatsApp Cloud API
   recommended, or Africa's Talking / Twilio / ClickSend / SMTP email). In
   development and tests the code is logged to the server console instead of being
-  sent. Production refuses to boot without a real path unless
-  `ALLOW_FIXED_OTP=true`.
+  sent. Production refuses to boot without a real delivery path.
+- **Service area** (the town the app serves) is set from `SERVICE_AREA_*` or at
+  runtime in **Admin → Settings**; the saved value wins. It centres the maps and
+  bounds how far they can be panned. Production refuses to boot without a centre.
 - **Monetisation is a monthly driver subscription, not a per-ride cut.** Revenue
   from cash rides is impossible to intercept, so the model is freemium: the owner
   account (role `admin`, i.e. `DRIVER_PHONE`) drives **free forever**, and every

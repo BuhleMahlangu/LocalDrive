@@ -32,6 +32,16 @@ const config = {
   currency: process.env.CURRENCY || 'zar',
   dbDriver: process.env.DB_DRIVER || 'sqlite',
   databaseUrl: process.env.DATABASE_URL,
+  // The town/area the app operates in. Shown as the default map centre and the
+  // bounds the map is limited to. The owner can change it at runtime in
+  // Admin → Settings (stored in the `settings` table); these env values are the
+  // fallback used before the owner sets one.
+  serviceArea: {
+    name: process.env.SERVICE_AREA_NAME || '',
+    lat: parseFloat(process.env.SERVICE_AREA_LAT || '0'),
+    lng: parseFloat(process.env.SERVICE_AREA_LNG || '0'),
+    radiusKm: parseFloat(process.env.SERVICE_AREA_RADIUS_KM || '30'),
+  },
   googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
   bankDetailsKey: process.env.BANK_DETAILS_KEY,
   payoutWebhookSecret: process.env.PAYOUT_WEBHOOK_SECRET,
@@ -45,9 +55,9 @@ const config = {
     replyTo: process.env.SMTP_REPLY_TO,
   },
   // Real SMS OTP delivery (see services/sms.js). Set SMS_PROVIDER to one of
-  // 'africastalking' | 'twilio' | 'clicksend' plus that provider's credentials.
-  // In development, messages are logged to the console instead of sent unless
-  // SMS_SEND_IN_DEV=true (so local work never burns SMS credit).
+  // 'whatsapp' | 'africastalking' | 'twilio' | 'clicksend' plus that provider's
+  // credentials. In development and tests, messages are logged to the console
+  // instead of sent unless SMS_FORCE=true (so local work never burns SMS credit).
   sms: {
     provider: process.env.SMS_PROVIDER,
     // Force real sending in dev/test (used by the E2E smoke run to assert the
@@ -103,18 +113,23 @@ if (nodeEnv === 'production') {
   if (!process.env.DRIVER_PHONE) {
     problems.push('DRIVER_PHONE must be set to the owner-driver phone in E.164 format');
   }
+  // The app needs a town to serve, otherwise maps open nowhere and the service
+  // radius check has no centre. Set it in the environment or in Admin → Settings
+  // (the settings row wins, so this only guards a truly unconfigured deploy).
+  const hasAreaEnv = Number.isFinite(config.serviceArea.lat) && Number.isFinite(config.serviceArea.lng)
+    && (config.serviceArea.lat !== 0 || config.serviceArea.lng !== 0);
+  if (!hasAreaEnv) {
+    problems.push('SERVICE_AREA_LAT and SERVICE_AREA_LNG must be set to the town centre (or configure it in Admin → Settings before going live)');
+  }
   // A real login code needs a real delivery path: SMS (see services/sms.js) or
-  // email OTP via SMTP. Without one, the code stays the fixed 123456 and
-  // anyone can sign in as any number. ALLOW_FIXED_OTP=true is a deliberate,
-  // loud escape hatch for a private/closed beta.
-  if (!otpSmsReady() && !otpEmailReady() && process.env.ALLOW_FIXED_OTP !== 'true') {
-    problems.push('No OTP delivery path configured — set SMS_PROVIDER + credentials (see .env.example), or SMTP_HOST/SMTP_USER/SMTP_PASS for email OTP, or explicitly set ALLOW_FIXED_OTP=true for a closed beta');
+  // email OTP via SMTP. There is no fixed-code fallback in production — without
+  // a delivery path nobody could sign in, and a static code would let anyone
+  // sign in as anyone.
+  if (!otpSmsReady() && !otpEmailReady()) {
+    problems.push('No OTP delivery path configured — set SMS_PROVIDER + credentials (see .env.example), or SMTP_HOST/SMTP_USER/SMTP_PASS for email OTP');
   }
   if (problems.length) {
     throw new Error(`DriveLocal refuses to start in production:\n - ${problems.join('\n - ')}`);
-  }
-  if (!otpSmsReady() && !otpEmailReady()) {
-    console.warn('[config] ⚠ ALLOW_FIXED_OTP=true — the verification code is fixed at 123456 for every number. Anyone who knows this can sign in as anyone. Do not expose this deployment publicly.');
   }
 } else if (!jwtSecret || jwtSecret === 'dev-secret-change-me') {
   // Development convenience: keep running, but make it obvious the default secret

@@ -210,7 +210,7 @@ export { L };
 // follow: marker key (e.g. 'driver') to keep centred; the user panning away
 //         turns following off and reveals a recenter button.
 export default function Map({
-  center = [-26.2155, 29.2916],
+  center = null,
   zoom = 12,
   markers = [],
   route = null,
@@ -267,8 +267,15 @@ export default function Map({
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    // No configured service area and no device fix yet: open on the first marker
+    // if there is one, otherwise a neutral mid-latitude view. Autofit/locate will
+    // take over as soon as real points arrive.
+    const firstMarker = Array.isArray(markers) && markers[0] && markers[0].lat != null
+      ? [markers[0].lat, markers[0].lng]
+      : null;
+    const initialCenter = center || firstMarker || [0, 0];
     const map = L.map(containerRef.current, {
-      center,
+      center: initialCenter,
       zoom,
       minZoom,
       maxZoom: 19,
@@ -616,7 +623,7 @@ export default function Map({
           map.setView([d.lat, d.lng], Math.max(map.getZoom(), d.type === 'driver' ? 13 : 15), { animate: false });
         }
       }
-    } else if (prevAutofitRef.current === true) {
+    } else if (prevAutofitRef.current === true && center) {
       // Trip cleared while the map was framing a route — glide back to the
       // caller's intended centre so we don't keep lingering elsewhere.
       fittedRef.current = false;

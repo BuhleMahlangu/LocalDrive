@@ -23,7 +23,7 @@ server.listen(config.port, () => {
   const emailService = require('./services/email');
   emailService.verify().then((ok) => {
     if (ok) console.log('[email] SMTP transport verified and ready');
-    else console.warn('[email] SMTP not configured or verification failed — OTP will use the interim fixed code (123456) for now.');
+    else console.warn('[email] SMTP not configured — OTPs fall back to SMS or, in development, the server console.');
   }).catch((e) => console.warn('[email] verification error:', e.message));
 
   // Auto-activate scheduled trips whose scheduled_at time has passed.

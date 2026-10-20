@@ -1,6 +1,7 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
 import { uploadIdentity } from './identity.js';
+import { waitForOtp } from './otp.js';
 
 // Map regressions that only show up in a real browser: tiles actually painting,
 // and the live-tracking marker being *moved* rather than destroyed and rebuilt.
@@ -11,7 +12,6 @@ import { uploadIdentity } from './identity.js';
 // would blink out and back. These tests assert the DOM node survives an update.
 
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
-const OTP = '123456';
 
 const AREA = { lat: -26.2155, lng: 29.2916 };
 
@@ -260,7 +260,8 @@ async function login(page, { role, phone, name = 'Test User' }) {
   await expect(page.locator('.login-screen')).toBeVisible();
   await page.locator('input[type="tel"]').fill(phone);
   await page.locator('form.card button.btn').click();
-  await page.locator('input[inputmode="numeric"]').fill(OTP);
+  const otp = await waitForOtp(phone);
+  await page.locator('input[inputmode="numeric"]').fill(otp);
   await page.locator('input[placeholder="Thabo"]').fill(name);
   await page.locator('form.card button.btn').click();
   if (isDriver) await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });

@@ -1234,6 +1234,30 @@ module.exports = {
     return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updated_at }));
   },
 
+  // The town/area the app operates in, resolved from the settings table with
+  // env config as the fallback. Drives the default map centre, the map bounds,
+  // and the driver's seed start position. Returns null when no centre is set,
+  // so callers fall back to the device's own location.
+  getServiceArea() {
+    const config = require('../config');
+    const raw = {
+      name: this.getSetting('service_area_name') ?? config.serviceArea.name,
+      lat: this.getSetting('service_area_lat') ?? config.serviceArea.lat,
+      lng: this.getSetting('service_area_lng') ?? config.serviceArea.lng,
+      radiusKm: this.getSetting('service_area_radius_km') ?? config.serviceArea.radiusKm,
+    };
+    const lat = parseFloat(raw.lat);
+    const lng = parseFloat(raw.lng);
+    const radiusKm = parseFloat(raw.radiusKm);
+    const hasCentre = Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0);
+    return {
+      name: String(raw.name || '').trim(),
+      lat: hasCentre ? lat : null,
+      lng: hasCentre ? lng : null,
+      radiusKm: Number.isFinite(radiusKm) && radiusKm > 0 ? radiusKm : 30,
+    };
+  },
+
   // ---------- Fare disputes ----------
   createDispute({ tripId, userId, reason }) {
     const id = uid('disp');

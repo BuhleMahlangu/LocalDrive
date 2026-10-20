@@ -3,8 +3,8 @@
 // without eyeballing: contrast, touch targets, tap highlight, focusability,
 // overflow and missing labels on the real rendered DOM.
 import { test, expect } from '@playwright/test';
+import { waitForOtp } from './otp.js';
 
-const OTP = '123456';
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
 
 const AUDIT = () => {
@@ -247,7 +247,8 @@ async function login(page, { role, phone, name = 'Test User' }) {
   await expect(page.locator('.login-screen')).toBeVisible();
   await page.locator('input[type="tel"]').fill(phone);
   await page.locator('form.card button.btn').click();
-  await page.locator('input[inputmode="numeric"]').fill(OTP);
+  const otp = await waitForOtp(phone);
+  await page.locator('input[inputmode="numeric"]').fill(otp);
   await page.locator('input[placeholder="Thabo"]').fill(name);
   await page.locator('form.card button.btn').click();
 }

@@ -1,9 +1,9 @@
 // SMS/OTP delivery abstraction.
 //
 // Configure one provider via env (see .env.example) and OTP codes are sent as
-// real SMS with a random per-request code. With no provider configured this
-// falls back to logging the message to the server console and the interim
-// fixed code 123456 (development only — see services/auth.js + config).
+// real SMS with a random per-request code. With no provider configured the
+// message is logged to the server console (development/test only — production
+// refuses to start without a provider, see config/index.js).
 //
 // Supported providers (SMS_PROVIDER):
 //   - whatsapp        WhatsApp Cloud API (Meta) — free tier / cheapest OTPs
@@ -166,8 +166,8 @@ async function send({ to, body }) {
     }
   }
   // Development default (or no provider configured): log instead of sending so
-  // local work never burns SMS credit. Set SMS_SEND_IN_DEV=true to send for
-  // real from a dev machine (e.g. testing a ClickSend integration).
+  // local work never burns SMS credit. Set SMS_FORCE=true to send for real from
+  // a dev machine (e.g. testing a ClickSend integration).
   const why = isConfigured() ? 'dev mode — SMS not sent' : 'no provider configured';
   console.log(`[sms] (${why}) To ${to}: ${body}`);
   return { logged: true };

@@ -3,9 +3,11 @@ info:
   title: DriveLocal API
   version: 0.4.0
   description: |
-    Backend for the community micro-transit ride-booking app serving the Kriel /
-    Thubelihle area in ZAR. Multiple vetted drivers are dispatched; customers sign
-    in with SMS OTP and can pay cash or by Yoco card.
+    Backend for the community micro-transit ride-booking app, priced in ZAR.
+    Multiple vetted drivers are dispatched; customers sign in with SMS OTP and
+    can pay cash or by Yoco card. The service area (town + map centre) is a
+    runtime setting the owner configures in the app, exposed publicly via
+    `GET /api/public/config`.
 
     Auth: request an OTP, then verify it to receive a `token` (JWT). Send the
     token as `Authorization: Bearer <token>` on role-gated routes. The owner
@@ -58,7 +60,7 @@ components:
       required: [phone, code, role]
       properties:
         phone: { type: string, example: "+27000000000" }
-        code: { type: string, example: "123456", description: "Fixed dev code; real code via SMS in production" }
+        code: { type: string, example: "482915", description: "The random 6-digit code delivered by SMS/WhatsApp (or email); logged to the server console in development when no provider is configured" }
         role: { type: string, enum: [customer, driver] }
         name: { type: string, nullable: true, description: "Optional profile name on first login" }
         email: { type: string, nullable: true }
@@ -335,7 +337,8 @@ paths:
                 properties:
                   phone: { type: string }
                   expiresInSeconds: { type: integer }
-                  dev: { type: boolean }
+                  dev: { type: boolean, description: "true when no SMS/email provider is configured, so the code was only logged to the server console (development)" }
+                  delivery: { type: string, enum: [sms, email, console] }
         "429":
           description: Rate limited (daily or per-window)
           content:
@@ -373,6 +376,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/User' }
+
+  /api/public/config:
+    get:
+      tags: [Public]
+      summary: Public app config (the service area/town the app serves)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  serviceArea:
+                    type: object
+                    properties:
+                      name: { type: string, description: "Human-readable service area name, may be empty" }
+                      lat: { type: number, nullable: true, description: "Map centre latitude, or null when unset" }
+                      lng: { type: number, nullable: true, description: "Map centre longitude, or null when unset" }
+                      radiusKm: { type: number }
 
   /api/public/trips/{id}/live:
     get:

@@ -17,7 +17,7 @@ LocalDrive/
 |-------|------|
 | Frontend | React 18 + Vite + Leaflet (OSM maps) + Socket.io client, PWA installable |
 | Backend | Node.js + Express + Socket.io + better-sqlite3 (SQLite) |
-| Auth | Phone OTP (WhatsApp Cloud API / Africa's Talking / Twilio / ClickSend, or email OTP via SMTP; interim fixed code `123456` in dev) + JWT |
+| Auth | Phone OTP (WhatsApp Cloud API / Africa's Talking / Twilio / ClickSend, or email OTP via SMTP) + JWT — random per-request code, logged to the console in dev when no provider is set |
 | Payments | Yoco hosted checkout (card) — cash by default until `YOCO_SECRET_KEY` is set |
 | Revenue | Monthly **driver subscription** (freemium: owner free, others paid) — no per-ride commission |
 | Real-time | Socket.io (driver GPS streaming every 3s + live trip pushes) |
@@ -39,18 +39,26 @@ npm run dev
 
 Open **http://localhost:5173**. If you already have a session you'll go straight in; otherwise you land on a start page and choose **Book a ride** (customer) or **I'm the driver**.
 
-## Demo accounts
+## First login (real accounts)
 
-The driver account is seeded by `npm run seed`. Dev OTP is always **`123456`**.
+There is **no demo data** — the database starts empty and you create real
+accounts through the app. The owner (driver) account is the phone in
+`DRIVER_PHONE`; run `npm run seed` once to create it (and set the service area),
+or just log in with that number.
 
 | Role | Phone |
 |------|-------|
-| Driver (you) | `+27000000000` (Chevrolet Spark LT · XX 000 XX) |
-| Customer | any other phone, e.g. `+27730002222` |
+| Owner / driver | your `DRIVER_PHONE` |
+| Customer | any other phone you sign in with |
+
+**OTP in development:** with no SMS/SMTP provider configured the code is random
+and printed to the **server console** (watch the terminal running the backend).
+With a provider configured, real codes are delivered by WhatsApp/SMS/email. There
+is no fixed code.
 
 > Because it's **one app**, logging in with the driver phone opens the **driver dashboard** (requests, online toggle, earnings, profile) and any other phone opens the **customer app**. Use "**Driver mode / Customer mode**" in the header to switch views without logging out.
 
-Only the phone in `DRIVER_PHONE` can ever act as the driver — the backend refuses to create a driver account for any other number (a safety gate added so a stranger picking "I'm the driver" can't see customers' bookings).
+Only the phone in `DRIVER_PHONE` becomes the owner/admin. Anyone else who picks "I'm the driver" submits an **application** the owner approves or rejects from the Admin tab.
 
 To see the full booking flow, open the app in **two windows** (e.g. normal + incognito): log in as the driver in one (toggle **Online**), and as a customer in the other — then book and accept.
 
@@ -59,14 +67,14 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 **Customer**
 - Start page to choose **customer / driver** login, OTP login (no passwords)
 - GPS auto-pickup + tap-map pickup & destination pins you can **re-adjust** at any time
-- Landmark chips + free-text "describe this place" notes (for areas without street names, e.g. Thubelihle / Kriel)
+- Landmark chips + free-text "describe this place" notes (for areas without street names)
 - Real-time driver tracking, route line, live ZAR fare estimate
 - Call / WhatsApp the driver during a trip
 - **Cash or Card** (Yoco hosted checkout) payment choice at booking — the Card option hides automatically until Yoco is configured
 - Transparent **fare breakdown** (base + distance + time) before booking
 - **Schedule a ride** for a future time — book now, ride later, or cancel it anytime before the driver starts it
 - **Saved places** (Home / Work / Taxi rank / School) for one-tap booking
-- **Preset pickup spots** for the Kriel/Thubelihle area — seeded on the server, shown as pins on the driver's map and as one-tap options in the customer's Book screen (no GPS permission needed)
+- **Preset pickup spots** — managed by the owner in Admin → Spots, shown as pins on the driver's map and as one-tap options in the customer's Book screen (no GPS permission needed)
 - Receipts, ride history, one-tap rebook of a previous route, **share receipt** via WhatsApp
 - **Fare disputes** — raise one from a completed trip; the owner reviews and resolves it, and you're notified of the outcome
 - Star rating + optional tip + quick **feedback tags** after each ride
@@ -86,13 +94,13 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 
 ## Environment configuration
 
-Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate automatically once their key is present.** With everything empty, the app runs on cash + the interim fixed OTP code + straight-line fare estimates.
+Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate automatically once their key is present.** With everything empty, the app runs on cash + OTP codes logged to the console (development only) + straight-line fare estimates.
 
 | Variable | Purpose |
 |----------|---------|
 | `DRIVER_PHONE` | The owner-driver's phone (E.164). Gates who may act as driver. Default `+27000000000` |
 | `JWT_SECRET` | Token signing. Production refuses to start unless it's a strong random value (32+ chars) |
-| *(OTP delivery)* | **WhatsApp Cloud API (recommended, free tier)**: set `SMS_PROVIDER=whatsapp` + `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` (+ `WHATSAPP_OTP_TEMPLATE` approved Authentication template). **SMS**: `SMS_PROVIDER=africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*`). **Email OTP via SMTP**: `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`). With none configured, the interim fixed code `123456` is used and logged to the server console (dev only — production refuses to start unless `ALLOW_FIXED_OTP=true` is set explicitly). In dev/test codes are logged even when a provider is configured (no credit burned); set `SMS_FORCE=true` to send for real |
+| *(OTP delivery)* | **WhatsApp Cloud API (recommended, free tier)**: set `SMS_PROVIDER=whatsapp` + `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` (+ `WHATSAPP_OTP_TEMPLATE` approved Authentication template). **SMS**: `SMS_PROVIDER=africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*`). **Email OTP via SMTP**: `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`). With none configured, the random code is logged to the server console (dev only — production refuses to start without a real delivery path). In dev/test codes are logged even when a provider is configured (no credit burned); set `SMS_FORCE=true` to send for real |
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
@@ -100,7 +108,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 
 OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop SMS-bombing.
 
-> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, **or if no OTP delivery path is configured** (no SMS provider and no SMTP, without an explicit `ALLOW_FIXED_OTP=true`). Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
+> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, **if no OTP delivery path is configured** (no SMS provider and no SMTP), **or if no service-area centre is set** (`SERVICE_AREA_LAT`/`LNG`). Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
 
 ## Tests, lint, backups
 
@@ -109,7 +117,7 @@ cd backend
 npm run seed        # create/update demo accounts + driver
 npm test            # unit tests (node --test, in-memory DB)
 npm run lint        # ESLint (also: cd app && npm run lint)
-npm run smoke       # end-to-end API test (server must be running first; run in dev mode for OTP 123456)
+npm run smoke       # end-to-end API test (server must be running first; run in dev mode so OTPs are logged)
 npm run backup      # SQLite online backup -> backend/backups (keeps last 14)
 
 cd app
@@ -119,7 +127,7 @@ npm run build       # production build + PWA service worker
 ## Roadmap / when you go live
 
 - **Enable card payments** — add real `YOCO_SECRET_KEY` + `YOCO_WEBHOOK_SECRET`, set success/cancel URLs to your HTTPS domain.
-- **OTP** — done: `SMS_PROVIDER=whatsapp` (free-tier Meta Cloud API) or `africastalking|twilio|clicksend`, or SMTP email, switches to random per-request codes delivered out-of-band. Keep `ALLOW_FIXED_OTP` unset in production.
+- **OTP** — done: `SMS_PROVIDER=whatsapp` (free-tier Meta Cloud API) or `africastalking|twilio|clicksend`, or SMTP email, switches to random per-request codes delivered out-of-band. Production requires a delivery path (no fixed code).
 - **Monetisation** — done: monthly **driver subscription** (freemium — the owner drives free, other drivers pay to receive bookings). Manage it in **Admin → Subscriptions**; drivers keep 100% of each fare. No per-ride commission.
 - **Real routing** — add a `GOOGLE_MAPS_API_KEY` for true road distances/ETAs.
 - **HTTPS hosting** — required for web push, in-app geolocation and secure payments. Free path (Oracle Cloud Always Free + DuckDNS) in `DEPLOY.md` §15.

@@ -61,7 +61,7 @@ const EN = {
   'sub.months': '{n} month(s)',
 
   // Landing
-  'landing.tagline': "Thubelihle & Kriel's friendly local ride — book in seconds, no surge pricing.",
+  'landing.tagline': "Your friendly local ride — book in seconds, no surge pricing.",
   'landing.online': 'is online — book a ride now',
   'landing.offline': 'is offline right now — you can still schedule ahead',
   'landing.customer': 'Book a ride',
@@ -96,7 +96,7 @@ const EN = {
   'login.taglineCustomer': 'Your trusted local driver — book in seconds.',
   'login.taglineDriver': 'Driver login — manage trips and bookings.',
   'login.enterCode': 'Enter your code',
-  'login.devHint': 'Dev mode: the verification code is 123456 — no SMS/email provider is configured.',
+  'login.devHint': 'Dev mode: no SMS/email provider is configured, so the verification code was printed to the server console.',
 
   // Home
   'home.book': 'Book a ride',
@@ -241,7 +241,7 @@ const ZU = {
   'sub.noPaymentsHint': 'Izinkokhelo zokubhalisa ezilotshwe umnikazi weplatifomu zizovela lapha.',
   'sub.months': 'inyanga ezingu-{n}',
 
-  'landing.tagline': 'Uhambo oluthile lwase-Thubelihle ne-Kriel — bhuka emizuzwaneni.',
+  'landing.tagline': 'Uhambo lwakho lwasekhaya — bhuka emizuzwaneni, akukho ntengo eyengeziwe.',
   'landing.online': 'usemgwaqweni — bhuka uhambo manje',
   'landing.offline': 'akakho okwamanje — ungahlela uhambo lungakazi',
   'landing.customer': 'Bhuka uhambo',
@@ -275,7 +275,7 @@ const ZU = {
   'login.taglineCustomer': 'Umshayeli wakho wethembekile — bhuka emizuzwaneni.',
   'login.taglineDriver': 'Ukungena komshayeli — lawula izikhathi zohambo.',
   'login.enterCode': 'Faka ikhodi yakho',
-  'login.devHint': 'Imodi yokuthuthukisa: ikhodi yokukhomba yi-123456 — awekho abahlinzeki be-SMS/email abaculiwe.',
+  'login.devHint': 'Imodi yokuthuthukisa: awekho abahlinzeki be-SMS/email abaculiwe, ngakho ikhodi yokukhomba iphrintwe ku-console yeseva.',
 
   'home.book': 'Bhuka uhambo',
   'home.savedPlaces': 'Izindawo ozilondoloze',

@@ -499,7 +499,11 @@ function SpotsTab() {
 }
 
 function SettingsTab() {
-  const [graceMs, setGraceMs] = useState('');
+  const [graceMin, setGraceMin] = useState('');
+  const [areaName, setAreaName] = useState('');
+  const [areaLat, setAreaLat] = useState('');
+  const [areaLng, setAreaLng] = useState('');
+  const [areaRadius, setAreaRadius] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -508,10 +512,31 @@ function SettingsTab() {
     api('/driver/settings')
       .then((r) => {
         const s = r.settings || {};
-        setGraceMs(String(Math.round((s.auto_offline_grace_ms ?? 600000) / 60000)));
+        setGraceMin(String(Math.round((s.auto_offline_grace_ms ?? 600000) / 60000)));
+        const a = r.serviceArea || {};
+        setAreaName(a.name || '');
+        setAreaLat(a.lat != null ? String(a.lat) : '');
+        setAreaLng(a.lng != null ? String(a.lng) : '');
+        setAreaRadius(String(a.radiusKm ?? 30));
       })
       .catch(() => setError('Could not load settings'));
   }, []);
+
+  function useMyLocation() {
+    if (!navigator.geolocation) {
+      setError('Location is not available in this browser');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setAreaLat(pos.coords.latitude.toFixed(6));
+        setAreaLng(pos.coords.longitude.toFixed(6));
+        setMessage('Location captured — review and save.');
+      },
+      () => setError('Could not read your location'),
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
 
   async function save(e) {
     e.preventDefault();
@@ -519,13 +544,17 @@ function SettingsTab() {
     setMessage('');
     setError('');
     try {
-      await api('/driver/settings', {
-        method: 'PUT',
-        body: {
-          auto_offline_grace_ms: Number(graceMs) * 60 * 1000,
-        },
-      });
+      const body = { auto_offline_grace_ms: Number(graceMin) * 60 * 1000 };
+      if (areaLat !== '' && areaLng !== '') {
+        body.service_area_lat = Number(areaLat);
+        body.service_area_lng = Number(areaLng);
+      }
+      body.service_area_name = areaName;
+      if (areaRadius !== '') body.service_area_radius_km = Number(areaRadius);
+      const r = await api('/driver/settings', { method: 'PUT', body });
       setMessage('Settings saved');
+      const s = r.settings || {};
+      setGraceMin(String(Math.round((s.auto_offline_grace_ms ?? 600000) / 60000)));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -535,15 +564,55 @@ function SettingsTab() {
 
   return (
     <>
-      <p className="subtitle">Business rules applied to every ride.</p>
+      <p className="subtitle">The town you serve, and the rules applied to every ride.</p>
 
       <form className="card form-card" onSubmit={save}>
+        <div className="field">
+          <span className="field-label">Service area name</span>
+          <input
+            type="text" placeholder="e.g. your town, province"
+            value={areaName}
+            onChange={(e) => setAreaName(e.target.value)}
+          />
+          <p className="hint">Shown to customers and on the driver map.</p>
+        </div>
+
+        <div className="field">
+          <span className="field-label">Town centre</span>
+          <div className="field-row">
+            <input
+              type="number" step="any" placeholder="Latitude"
+              value={areaLat}
+              onChange={(e) => setAreaLat(e.target.value)}
+            />
+            <input
+              type="number" step="any" placeholder="Longitude"
+              value={areaLng}
+              onChange={(e) => setAreaLng(e.target.value)}
+            />
+          </div>
+          <button type="button" className="link-btn" onClick={useMyLocation} style={{ marginTop: '4px' }}>
+            Use my current location
+          </button>
+          <p className="hint">The map opens here and is bounded to the radius below.</p>
+        </div>
+
+        <div className="field">
+          <span className="field-label">Service radius (km)</span>
+          <input
+            type="number" min="1" max="500"
+            value={areaRadius}
+            onChange={(e) => setAreaRadius(e.target.value)}
+          />
+          <p className="hint">How far from the centre the map can be panned, and the default driver catchment.</p>
+        </div>
+
         <div className="field">
           <span className="field-label">Go offline after (minutes)</span>
           <input
             type="number" min="1" max="60"
-            value={graceMs}
-            onChange={(e) => setGraceMs(e.target.value)}
+            value={graceMin}
+            onChange={(e) => setGraceMin(e.target.value)}
           />
           <p className="hint">If no trip arrives within this time, a driver shows offline automatically.</p>
         </div>

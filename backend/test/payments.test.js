@@ -18,9 +18,15 @@ const repo = require('../src/db/repository');
 const { createApp } = require('../src/app');
 const { signToken } = require('../src/middleware');
 
-// Keep test output clean: never actually send an SMS.
+// Tests never actually send an SMS: capture the OTP the way a real recipient
+// would, so logins use the same random code the server generated.
 const sms = require('../src/services/sms');
-sms.send = async () => ({ dev: true });
+const sentOtps = new Map();
+sms.send = async ({ to, body }) => {
+  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
+  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
+  return { logged: true };
+};
 
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
@@ -136,8 +142,10 @@ async function api(method, path, body, token, raw = false) {
 
 async function login(phone, role, name, email) {
   await api('POST', '/api/auth/otp/request', { phone, role });
+  const code = sentOtps.get(phone.replace(/[^+\d]/g, ''));
+  assert.ok(code, `otp code captured for ${phone}`);
   const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code: '123456', role, name, email,
+    phone, code, role, name, email,
   });
   assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
   return res.json;

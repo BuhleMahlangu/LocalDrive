@@ -24,7 +24,11 @@ function latestLoggedOtp(phone) {
   for (const file of otpLogCandidates()) {
     let content;
     try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
-    // Lines look like: [sms] (dev mode — SMS not sent) To +27...: ...code is 123456...
+    // Windows PowerShell's `>` redirect writes UTF-16LE; reading it as UTF-8
+    // leaves NUL bytes between characters. Strip them so the regex still works
+    // whether the dev captured the log with cmd or PowerShell.
+    content = content.replace(/\0/g, '');
+    // Lines look like: [sms] (dev mode — SMS not sent) To +27...: ...code is 482915...
     const re = new RegExp(`To ${phone.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\D.*?(\\d{6})`, 'g');
     let match;
     let last = null;
@@ -68,9 +72,13 @@ async function uploadCustomerIdentity(token, idNumber) {
 
 async function login(phone, role, name, email) {
   const requested = await api('POST', '/api/auth/otp/request', { phone, role });
-  // Prefer the real dev code the server just logged; fall back to the fixed
-  // interim code when a provider is configured to actually send.
-  const code = (requested.json && requested.json.dev && latestLoggedOtp(phone)) || '123456';
+  // In dev the server logs the random code to its stdout (see latestLoggedOtp).
+  // There is no fixed fallback: a real provider in dev must be avoided by not
+  // setting SMS_FORCE, and in prod the code genuinely arrives by SMS/email.
+  const code = requested.json && requested.json.dev ? latestLoggedOtp(phone) : null;
+  if (!code) {
+    throw new Error(`Could not read the dev OTP for ${phone}. Is the server running in dev mode with its output going to backend-dev.log?`);
+  }
   const res = await api('POST', '/api/auth/otp/verify', { phone, code, role, name, email });
   return res;
 }
@@ -83,7 +91,9 @@ async function main() {
 
   console.log('\n[0] Public pickup spots');
   const spots = await api('GET', '/api/pickup-spots');
-  assert(spots.status === 200 && Array.isArray(spots.json.spots) && spots.json.spots.length > 0, 'pickup spots listed');
+  // Empty is the correct state for a fresh, real deployment; the owner adds
+  // spots in the app. Just assert the public contract shape.
+  assert(spots.status === 200 && Array.isArray(spots.json.spots), 'pickup spots endpoint returns a list');
 
   console.log('\n[1] Driver goes online');
   const driver = await login(driverPhone, 'driver', 'Thabo', 'd@x.za');

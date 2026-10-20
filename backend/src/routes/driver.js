@@ -418,20 +418,20 @@ function driverRoutes({ notify }) {
     } catch (e) { next(e); }
   });
 
-  // ----- Admin settings (owner only — auto-offline behaviour everyone
-  // depends on) -----
+  // ----- Admin settings (owner only — auto-offline behaviour and the town the
+  // app serves) -----
   router.get('/settings', adminOnly, (_req, res) => {
     const defaults = {
       auto_offline_grace_ms: config.autoOfflineGraceMs,
     };
     const saved = {};
     for (const row of repo.listSettings()) saved[row.key] = row.value;
-    res.json({ settings: { ...defaults, ...saved } });
+    res.json({ settings: { ...defaults, ...saved }, serviceArea: repo.getServiceArea() });
   });
 
   router.put('/settings', adminOnly, (req, res, next) => {
     try {
-      const { auto_offline_grace_ms } = req.body || {};
+      const { auto_offline_grace_ms, service_area_name, service_area_lat, service_area_lng, service_area_radius_km } = req.body || {};
       if (auto_offline_grace_ms != null) {
         const n = parseInt(auto_offline_grace_ms, 10);
         if (!Number.isFinite(n) || n < 1000 || n > 3600000) {
@@ -439,7 +439,27 @@ function driverRoutes({ notify }) {
         }
         repo.setSetting('auto_offline_grace_ms', n);
       }
-      res.json({ saved: repo.listSettings() });
+      if (service_area_name != null) {
+        repo.setSetting('service_area_name', String(service_area_name).trim());
+      }
+      // Latitude/longitude must be provided as a pair so the centre is valid.
+      if (service_area_lat != null || service_area_lng != null) {
+        const lat = parseFloat(service_area_lat);
+        const lng = parseFloat(service_area_lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          return res.status(400).json({ error: 'Service area needs a valid latitude (-90..90) and longitude (-180..180)' });
+        }
+        repo.setSetting('service_area_lat', lat);
+        repo.setSetting('service_area_lng', lng);
+      }
+      if (service_area_radius_km != null) {
+        const r = parseFloat(service_area_radius_km);
+        if (!Number.isFinite(r) || r <= 0 || r > 500) {
+          return res.status(400).json({ error: 'Service area radius must be between 1 and 500 km' });
+        }
+        repo.setSetting('service_area_radius_km', r);
+      }
+      res.json({ saved: repo.listSettings(), serviceArea: repo.getServiceArea() });
     } catch (e) { next(e); }
   });
 

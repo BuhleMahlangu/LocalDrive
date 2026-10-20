@@ -4,21 +4,34 @@ const assert = require('node:assert/strict');
 // The OTP *request* caps are relaxed outside production (no real SMS is sent
 // there), so the 3-per-minute production limit must be asserted against an
 // explicitly production-configured module. Reloading with a purged cache keeps
-// each environment's buckets and limits isolated. ALLOW_FIXED_OTP is set
+// each environment's buckets and limits isolated. A dummy SMS provider is set
 // because these tests exercise rate limiting, not OTP delivery — production
-// config otherwise refuses to start without an SMS/SMTP delivery path.
+// config refuses to start without a real delivery path.
 function loadRateLimit(nodeEnv) {
   const prev = process.env.NODE_ENV;
-  const prevFixed = process.env.ALLOW_FIXED_OTP;
+  const prevProvider = process.env.SMS_PROVIDER;
+  const prevUser = process.env.CLICKSEND_USERNAME;
+  const prevKey = process.env.CLICKSEND_API_KEY;
+  const prevLat = process.env.SERVICE_AREA_LAT;
+  const prevLng = process.env.SERVICE_AREA_LNG;
   process.env.NODE_ENV = nodeEnv;
-  if (nodeEnv === 'production') process.env.ALLOW_FIXED_OTP = 'true';
+  if (nodeEnv === 'production') {
+    process.env.SMS_PROVIDER = 'clicksend';
+    process.env.CLICKSEND_USERNAME = 'ratelimit-test';
+    process.env.CLICKSEND_API_KEY = 'ratelimit-test';
+    process.env.SERVICE_AREA_LAT = '-26.2155';
+    process.env.SERVICE_AREA_LNG = '29.2916';
+  }
   const path = require.resolve('../src/services/rateLimit');
   delete require.cache[path];
   delete require.cache[require.resolve('../src/config')];
   const mod = require('../src/services/rateLimit');
   process.env.NODE_ENV = prev;
-  if (prevFixed === undefined) delete process.env.ALLOW_FIXED_OTP;
-  else process.env.ALLOW_FIXED_OTP = prevFixed;
+  if (prevProvider === undefined) delete process.env.SMS_PROVIDER; else process.env.SMS_PROVIDER = prevProvider;
+  if (prevUser === undefined) delete process.env.CLICKSEND_USERNAME; else process.env.CLICKSEND_USERNAME = prevUser;
+  if (prevKey === undefined) delete process.env.CLICKSEND_API_KEY; else process.env.CLICKSEND_API_KEY = prevKey;
+  if (prevLat === undefined) delete process.env.SERVICE_AREA_LAT; else process.env.SERVICE_AREA_LAT = prevLat;
+  if (prevLng === undefined) delete process.env.SERVICE_AREA_LNG; else process.env.SERVICE_AREA_LNG = prevLng;
   return mod;
 }
 
