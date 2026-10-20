@@ -247,6 +247,15 @@ async function main() {
   const resolved = await api('POST', `/api/admin/disputes/${dispute.json.dispute.id}/resolve`, { resolution: 'Smoke test: reviewed, fare stands' }, driverToken);
   assert(resolved.status === 200 && resolved.json.dispute.status === 'resolved', 'owner resolved the dispute');
 
+  console.log('\n[13] Subscriptions (freemium): owner free, driver payments recorded');
+  // The owner (role admin) drives free — no subscription required to go online.
+  const ownerSub = await api('GET', '/api/driver/subscription', null, driverToken);
+  assert(ownerSub.status === 200 && ownerSub.json.subscription.plan === 'free', 'owner plan is free');
+  assert(ownerSub.json.subscription.active === true, 'owner subscription is active');
+  // The admin listing surfaces every driver's subscription state.
+  const subList = await api('GET', '/api/admin/subscriptions', null, driverToken);
+  assert(subList.status === 200 && Array.isArray(subList.json.subscriptions), 'admin can list subscriptions');
+
   console.log('\nAll smoke tests passed.');
 }
 
