@@ -859,3 +859,12 @@ test('scheduled trips hold a promo until activation, then consume it', async () 
   await api('POST', `/api/driver/trips/${tripId}/activate`, {}, driver.token);
   assert.equal(repo.getPromoByCode('WELCOME10').used_count, before + 1, 'promo consumed once on activation');
 });
+
+test('GET /api/public/config exposes the service area and OTP delivery channel', async () => {
+  const res = await api('GET', '/api/public/config');
+  assert.equal(res.status, 200);
+  assert.ok(res.json.serviceArea, 'serviceArea present');
+  // The login screen uses this to decide whether an email address is required.
+  assert.ok(['sms', 'email', 'console'].includes(res.json.otpDelivery), res.json.otpDelivery);
+});
+

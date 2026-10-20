@@ -380,7 +380,7 @@ paths:
   /api/public/config:
     get:
       tags: [Public]
-      summary: Public app config (the service area/town the app serves)
+      summary: Public app config (service area + OTP delivery channel)
       responses:
         "200":
           description: OK
@@ -396,6 +396,10 @@ paths:
                       lat: { type: number, nullable: true, description: "Map centre latitude, or null when unset" }
                       lng: { type: number, nullable: true, description: "Map centre longitude, or null when unset" }
                       radiusKm: { type: number }
+                  otpDelivery:
+                    type: string
+                    enum: [sms, email, console]
+                    description: "How login codes are delivered. 'email' means the login screen must collect an email address; 'console' is development only."
 
   /api/public/trips/{id}/live:
     get:

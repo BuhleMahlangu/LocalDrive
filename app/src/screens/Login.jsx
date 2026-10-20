@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { api, setSession } from '../api.js';
 import { useI18n, LangToggle } from '../i18n.jsx';
+import { loadAppConfig } from '../lib/appConfig.js';
 
 export default function Login({ role = 'customer', onLogin, onBack }) {
   const { t } = useI18n();
@@ -15,6 +16,16 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
   // How the last OTP was delivered: 'sms' | 'email' | 'console' (dev fallback).
   const [delivery, setDelivery] = useState(null);
   const [devMode, setDevMode] = useState(false);
+  // Which channel this deployment uses ('sms' | 'email' | 'console'): when it's
+  // email, the address is required — otherwise the code would be sent nowhere.
+  const [channel, setChannel] = useState('sms');
+  const emailRequired = channel === 'email';
+
+  useEffect(() => {
+    let alive = true;
+    loadAppConfig().then((c) => { if (alive) setChannel(c.otpDelivery); });
+    return () => { alive = false; };
+  }, []);
 
   function handlePhone(e) {
     // Friendly live formatting for SA numbers as they type (keeps the raw input clean).
@@ -25,6 +36,10 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
   async function requestCode(e) {
     e.preventDefault();
     setError('');
+    if (emailRequired && !email.trim()) {
+      setError(t('login.emailRequired'));
+      return;
+    }
     setLoading(true);
     try {
       const res = await api('/auth/otp/request', { method: 'POST', body: { phone, role, email: email.trim() || undefined } });
@@ -76,8 +91,14 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
             <input type="tel" inputMode="tel" placeholder={t('login.ph')} value={phone} onChange={handlePhone} required autoFocus />
           </label>
           <label>
-            {t('login.email')} (optional — used to deliver the code by email)
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@email.com" />
+            {t('login.email')}{emailRequired ? '' : ` (${t('login.emailOptional')})`}
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@email.com"
+              required={emailRequired}
+            />
           </label>
           {error && <p className="error">{error}</p>}
           <button className={`btn ${isDriver ? 'driver' : 'primary'} big`} disabled={loading}>{loading ? t('login.sending') : t('login.requestCode')}</button>

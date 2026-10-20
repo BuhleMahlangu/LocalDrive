@@ -116,6 +116,15 @@ WHATSAPP_PHONE_NUMBER_ID=...
 WHATSAPP_OTP_TEMPLATE=drivelocal_otp      # approved Authentication template
 WHATSAPP_TEMPLATE_LANG=en
 
+# Email OTP (SMTP) — leave SMS_PROVIDER blank and set these three. The login
+# screen detects email-only mode and makes the email field required, so users
+# must enter an address to receive their code.
+# SMTP_HOST=smtp.yourprovider.com
+# SMTP_PORT=587
+# SMTP_USER=you@yourdomain.com
+# SMTP_PASS=...
+# SMTP_FROM=DriveLocal <no-reply@yourdomain.com>
+
 # Alternative OTP providers (pick ONE for SMS_PROVIDER):
 #   SMS_PROVIDER=africastalking  → AT_API_KEY, AT_USERNAME, AT_SENDER_ID
 #   SMS_PROVIDER=twilio          → TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
