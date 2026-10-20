@@ -8,9 +8,9 @@ The path below is the recommended **one-host** setup (frontend + API + WebSocket
 
 ## 1. What you need
 
-- A domain (e.g. `drivelocal.example.co.za`) pointing to your server's public IP.
-- A server with Node.js 18+ (we recommend Node 20/22 LTS). Ubuntu/Debian assumed below.
-- Real keys from: **Yoco** (card payments — optional for launch), and VAPID keys for push (`npx web-push generate-vapid-keys`). SMS OTP is **not integrated yet**: the verification code is the fixed interim value `123456` (see §13).
+- A domain — a **free DuckDNS subdomain** works fine (e.g. `drivelocal.duckdns.org`), or your own domain.
+- A server with Node.js 18+ (we recommend Node 20/22 LTS). Ubuntu/Debian assumed below. **Oracle Cloud Always Free** (ARM Ampere, 4 cores / 24 GB) runs this comfortably at R0/month — see §15.
+- Real keys from: **Yoco** (card payments — optional for launch), VAPID keys for push (`npx web-push generate-vapid-keys`), and an **OTP provider** — WhatsApp Cloud API (free tier, recommended), or an SMS provider (Africa's Talking / Twilio / ClickSend), or SMTP email. See §13.
 
 ## 2. Directory layout
 
@@ -102,9 +102,20 @@ PORT=4000
 JWT_SECRET=<64+ random chars — the server refuses weak values in production>
 JWT_EXPIRES=30d
 DRIVER_PHONE=+27000000000        # the owner driver — gates driver login
-# SMS OTP: no provider configured yet. The code is the fixed interim value
-# 123456 in every environment (logged to the server console). Integrate a
-# provider after deploying (TODO in backend/src/services/sms.js).
+# OTP delivery — production refuses to start unless a real path is configured
+# (or you explicitly set ALLOW_FIXED_OTP=true for a private pilot).
+# Recommended for SA: WhatsApp Cloud API (free tier / cheapest OTPs).
+SMS_PROVIDER=whatsapp
+WHATSAPP_ACCESS_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_OTP_TEMPLATE=drivelocal_otp      # approved Authentication template
+WHATSAPP_TEMPLATE_LANG=en
+
+# Alternative OTP providers (pick ONE for SMS_PROVIDER):
+#   SMS_PROVIDER=africastalking  → AT_API_KEY, AT_USERNAME, AT_SENDER_ID
+#   SMS_PROVIDER=twilio          → TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
+#   SMS_PROVIDER=clicksend       → CLICKSEND_USERNAME, CLICKSEND_API_KEY, CLICKSEND_FROM
+#   Email fallback (any provider) → SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM
 CORS_ORIGINS=https://drivelocal.example.co.za
 DB_DRIVER=sqlite
 GOOGLE_MAPS_API_KEY=             # optional, enables real roads/ETA
@@ -119,7 +130,7 @@ YOCO_SUCCESS_URL=https://drivelocal.example.co.za/?payment=success
 YOCO_CANCEL_URL=https://drivelocal.example.co.za/?payment=cancelled
 ```
 
-> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It also logs a loud warning that the OTP is still the fixed `123456` until a provider is integrated.
+> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It **also refuses to start without a working OTP delivery path** (WhatsApp/SMS or SMTP) unless you set `ALLOW_FIXED_OTP=true` for a private pilot — so you can never accidentally ship the fixed code to real users.
 
 ## 8. Enabling card payments (Yoco)
 
@@ -149,7 +160,7 @@ npm run backup    # confirm a snapshot is written
 Run through this on the live URL before telling anyone:
 
 - [ ] **HTTPS works and the PWA installs** (browser "Add to Home screen" / install prompt).
-- [ ] **Sign-in works with the interim code** — the verification code is `123456` for every number until an SMS/OTP provider is integrated. Sign in as both customer and driver.
+- [ ] **Sign-in works with a real code** — the OTP is delivered by WhatsApp/SMS/email. Sign in as both customer and driver.
 - [ ] **Location permission granted** — the #1 gotcha. On a phone it must be allowed for the domain (Settings → Privacy → Location); without it the customer can't pick up automatically and push needs HTTPS anyway.
 - [ ] **Book a trip end→end**: request → driver accepts → driver taps "I've arrived" → customer sees the arrived card → start trip → fare confirm → rating. Watch for live socket updates (no CORS / WS proxy errors in the browser console).
 - [ ] **Share link** `GET /api/public/trips/<id>/live` opens without logging in.
@@ -174,15 +185,24 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
   with the app installed.
 - Browser audio for the request chime needs a user gesture first (it primes on the
   first tap) — do not expect sound in the background tab or phone locked.
-- Don't change `platformFeePercent` and `autoOfflineGraceMs` in code — use the
-  **Admin** tab in the driver app (writes to the fast `settings` table). Changed
-  values are picked up by the backend scheduler, so no restart needed.
+- Don't change `autoOfflineGraceMs` in code — use the **Admin** tab in the driver app
+  (writes to the fast `settings` table). Changed values are picked up by the
+  backend scheduler, so no restart needed. (`platformFeePercent` is legacy: rides
+  no longer carry a commission — see the subscription model below.)
 - Web push only works on HTTPS with a service worker — the frontend build wires
   push handlers into the generated `sw.js` automatically.
-- **OTP is currently a fixed `123456` in every environment** (no SMS provider
-  integrated yet — ClickSend was removed before launch). Anyone who knows this
-  can sign in as any number, so integrate an OTP/SMS provider in
-  `backend/src/services/sms.js` before inviting real users.
+- **OTP delivery** uses whichever provider is configured (WhatsApp Cloud API
+  recommended, or Africa's Talking / Twilio / ClickSend / SMTP email). In
+  development and tests the code is logged to the server console instead of being
+  sent. Production refuses to boot without a real path unless
+  `ALLOW_FIXED_OTP=true`.
+- **Monetisation is a monthly driver subscription, not a per-ride cut.** Revenue
+  from cash rides is impossible to intercept, so the model is freemium: the owner
+  account (role `admin`, i.e. `DRIVER_PHONE`) drives **free forever**, and every
+  other driver needs an active paid period to go online and accept rides (they
+  keep 100% of each fare). Manage plans and record manual payments (EFT/cash) from
+  the owner app's **Admin → Subscriptions** tab; drivers see their status and
+  payment history under the **Subscription** tab.
 
 ## 14. Docker (alternative, optional)
 
@@ -247,6 +267,78 @@ BACKUP_S3_PREFIX=drivelocal       # object-key prefix inside the bucket
 Uploads use AWS SigV4 (path-style) with no SDK — the same code works for any
 S3-compatible provider. Restore by copying a snapshot's `.sqlite` file over
 `/app/data/drivelocal.sqlite` (the `drivelocal-data` volume) and restarting `app`. The `backup` container runs inside the same network and needs **no** network config beyond DNS access to the object-storage endpoint.
+
+## 15. Free hosting: Oracle Cloud Always Free + DuckDNS
+
+This is the fully-free stack: an **Oracle Cloud Always Free** ARM VM (Ampere A1 — up to 4 cores / 24 GB RAM, free forever), a free **DuckDNS** subdomain, and **Caddy** for automatic HTTPS. Total cost: **R0/month**. No cold starts (unlike Render/Railway free tiers, which sleep and kill Socket.io), and SQLite + WebSockets work natively.
+
+### 15.1 Create the VM
+
+1. Sign up at Oracle Cloud and pick a home region close to your users (e.g. `af-johannesburg-1`).
+2. Create a **Compute → Instance**:
+   - Shape: **Ampere → VM.Standard.A1.Flex** (Always Free eligible; 2–4 OCPUs / 12–24 GB).
+   - Image: **Ubuntu 22.04 or 24.04**.
+   - Boot volume: default (Always Free covers up to 200 GB).
+3. Upload your SSH key, create the instance, note its **public IP**.
+4. In the instance's VCN **Security List / Network Security Group**, add ingress rules for **TCP 80** and **TCP 443** from `0.0.0.0/0` (Oracle images also ship an `iptables`/`firewalld` firewall — see 15.4).
+
+### 15.2 Free domain (DuckDNS)
+
+1. Go to [duckdns.org](https://www.duckdns.org), sign in, create a subdomain like `drivelocal`.
+2. Set its IP to your VM's public IP (`drivelocal.duckdns.org → <public IP>`).
+3. Use `drivelocal.duckdns.org` everywhere the guide says `drivelocal.example.co.za`.
+
+> DuckDNS is a plain DNS provider — Let's Encrypt will issue a certificate for it exactly as for a paid domain, so nothing else changes.
+
+### 15.3 Install the stack
+
+```bash
+# Node 20 LTS
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs git
+# Caddy (official repo)
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+# App
+sudo mkdir -p /opt/drivelocal && sudo chown $USER /opt/drivelocal
+cd /opt/drivelocal
+git clone <your-repo> .        # or scp the folders up
+cd app && npm ci && npm run build && cd ..
+cd backend && npm install --omit=dev && cp .env.example .env
+```
+
+Edit `backend/.env` per the **§7 checklist**, with `CORS_ORIGINS=https://drivelocal.duckdns.org`. Then seed and run under PM2:
+
+```bash
+cd /opt/drivelocal/backend
+npm run seed
+sudo npm install -g pm2
+pm2 start "node src/server.js" --name drivelocal && pm2 save && pm2 startup
+```
+
+Point Caddy at it (copy the §5 Caddyfile, replacing the domain with your DuckDNS name):
+
+```bash
+sudo cp /opt/drivelocal/Caddyfile.example /etc/caddy/Caddyfile   # or write it from §5
+sudo systemctl reload caddy
+```
+
+Caddy fetches the certificate on first request. Open `https://drivelocal.duckdns.org`.
+
+### 15.4 Gotchas on Oracle
+
+- **Two firewalls.** Oracle's cloud Security List **and** the VM's own firewall must both allow 80/443. On Ubuntu images that ships as `iptables`:
+  ```bash
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+  sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  sudo netfilter-persistent save
+  ```
+- **Keep port 4000 bound to localhost** (Caddy is the only public entry point) — this is already the default.
+- **Backups:** schedule §6's `npm run backup` nightly; the Always Free boot volume is not a backup. Add the optional **S3-compatible off-site** copy (Cloudflare R2 free tier works well) from §14.
+- **Always Free capacity:** Ampere A1 availability varies by region; if you can't create one, try another region or the `VM.Standard.E2.1.Micro` shape (also Always Free, smaller).
 
 ## Troubleshooting
 

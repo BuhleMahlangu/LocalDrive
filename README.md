@@ -17,8 +17,9 @@ LocalDrive/
 |-------|------|
 | Frontend | React 18 + Vite + Leaflet (OSM maps) + Socket.io client, PWA installable |
 | Backend | Node.js + Express + Socket.io + better-sqlite3 (SQLite) |
-| Auth | Phone OTP (real SMS via Africa's Talking / Twilio / ClickSend, or email OTP via SMTP; interim fixed code `123456` in dev) + JWT |
+| Auth | Phone OTP (WhatsApp Cloud API / Africa's Talking / Twilio / ClickSend, or email OTP via SMTP; interim fixed code `123456` in dev) + JWT |
 | Payments | Yoco hosted checkout (card) — cash by default until `YOCO_SECRET_KEY` is set |
+| Revenue | Monthly **driver subscription** (freemium: owner free, others paid) — no per-ride commission |
 | Real-time | Socket.io (driver GPS streaming every 3s + live trip pushes) |
 | Currency | ZAR (South African Rand) |
 
@@ -91,7 +92,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 |----------|---------|
 | `DRIVER_PHONE` | The owner-driver's phone (E.164). Gates who may act as driver. Default `+27000000000` |
 | `JWT_SECRET` | Token signing. Production refuses to start unless it's a strong random value (32+ chars) |
-| *(SMS/OTP delivery)* | **Real SMS OTP**: set `SMS_PROVIDER` to `africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*` in `backend/.env.example`). Alternatively **email OTP via SMTP**: set `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`) and the code is emailed. With neither configured, the interim fixed code `123456` is used and logged to the server console (dev only — production refuses to start unless `ALLOW_FIXED_OTP=true` is set explicitly). In dev/test SMS is logged to the console instead of sent (no credit burned); set `SMS_FORCE=true` to send for real |
+| *(OTP delivery)* | **WhatsApp Cloud API (recommended, free tier)**: set `SMS_PROVIDER=whatsapp` + `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` (+ `WHATSAPP_OTP_TEMPLATE` approved Authentication template). **SMS**: `SMS_PROVIDER=africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*`). **Email OTP via SMTP**: `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`). With none configured, the interim fixed code `123456` is used and logged to the server console (dev only — production refuses to start unless `ALLOW_FIXED_OTP=true` is set explicitly). In dev/test codes are logged even when a provider is configured (no credit burned); set `SMS_FORCE=true` to send for real |
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
@@ -118,8 +119,9 @@ npm run build       # production build + PWA service worker
 ## Roadmap / when you go live
 
 - **Enable card payments** — add real `YOCO_SECRET_KEY` + `YOCO_WEBHOOK_SECRET`, set success/cancel URLs to your HTTPS domain.
-- **Real SMS OTP** — done: `SMS_PROVIDER=africastalking|twilio|clicksend` + credentials switches to random per-request codes sent by SMS. Keep `ALLOW_FIXED_OTP` unset in production.
+- **OTP** — done: `SMS_PROVIDER=whatsapp` (free-tier Meta Cloud API) or `africastalking|twilio|clicksend`, or SMTP email, switches to random per-request codes delivered out-of-band. Keep `ALLOW_FIXED_OTP` unset in production.
+- **Monetisation** — done: monthly **driver subscription** (freemium — the owner drives free, other drivers pay to receive bookings). Manage it in **Admin → Subscriptions**; drivers keep 100% of each fare. No per-ride commission.
 - **Real routing** — add a `GOOGLE_MAPS_API_KEY` for true road distances/ETAs.
-- **HTTPS hosting** — required for web push, in-app geolocation and secure payments. See `DEPLOY.md`.
-- **Driver payouts** — MVP pays 100% to the owner (single driver). Yoco payouts if you ever split fares.
+- **HTTPS hosting** — required for web push, in-app geolocation and secure payments. Free path (Oracle Cloud Always Free + DuckDNS) in `DEPLOY.md` §15.
+- **Driver payouts** — card fares settle via Yoco; cash fares go hand-to-hand. Payout batches for card earnings are in the driver **Payouts** tab.
 - **Database** — SQLite is fine for one driver; migrate to Postgres/PostGIS (`schema.sql` mirrored) if you scale.
