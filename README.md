@@ -17,7 +17,7 @@ LocalDrive/
 |-------|------|
 | Frontend | React 18 + Vite + Leaflet (OSM maps) + Socket.io client, PWA installable |
 | Backend | Node.js + Express + Socket.io + better-sqlite3 (SQLite) |
-| Auth | Phone OTP (fixed interim code `123456` — SMS provider to be integrated post-deploy) + JWT |
+| Auth | Phone OTP (real SMS via Africa's Talking / Twilio / ClickSend, or email OTP via SMTP; interim fixed code `123456` in dev) + JWT |
 | Payments | Yoco hosted checkout (card) — cash by default until `YOCO_SECRET_KEY` is set |
 | Real-time | Socket.io (driver GPS streaming every 3s + live trip pushes) |
 | Currency | ZAR (South African Rand) |
@@ -67,6 +67,7 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 - **Saved places** (Home / Work / Taxi rank / School) for one-tap booking
 - **Preset pickup spots** for the Kriel/Thubelihle area — seeded on the server, shown as pins on the driver's map and as one-tap options in the customer's Book screen (no GPS permission needed)
 - Receipts, ride history, one-tap rebook of a previous route, **share receipt** via WhatsApp
+- **Fare disputes** — raise one from a completed trip; the owner reviews and resolves it, and you're notified of the outcome
 - Star rating + optional tip + quick **feedback tags** after each ride
 - **Web push** notifications (trip accepted / driver on the way)
 - **Dark mode** toggle + installable PWA, works offline
@@ -80,6 +81,7 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 - Earnings dashboard: **take-home this week**, today's fares, avg fare, tips, avg rating, ride counts
 - Full trip history with fares, tips and ratings, and which customer each ride was for
 - Profile editor: vehicle, license plate, service radius, base fare, per-km, per-min rates
+- **Owner admin console**: driver vetting, trip audit records (map + chat + payments), payouts/EFT export, ops dashboard, and **fare-dispute review**
 
 ## Environment configuration
 
@@ -89,7 +91,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 |----------|---------|
 | `DRIVER_PHONE` | The owner-driver's phone (E.164). Gates who may act as driver. Default `+27000000000` |
 | `JWT_SECRET` | Token signing. Production refuses to start unless it's a strong random value (32+ chars) |
-| *(SMS/OTP delivery)* | Optional **email OTP via SMTP** (Nodemailer): set `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`) and the code is emailed; otherwise the interim fixed code `123456` is used and logged to the server console. Real SMS still requires a provider (Twilio, Vonage, Africa's Talking, ClickSend…) |
+| *(SMS/OTP delivery)* | **Real SMS OTP**: set `SMS_PROVIDER` to `africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*` in `backend/.env.example`). Alternatively **email OTP via SMTP**: set `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`) and the code is emailed. With neither configured, the interim fixed code `123456` is used and logged to the server console (dev only — production refuses to start unless `ALLOW_FIXED_OTP=true` is set explicitly). In dev/test SMS is logged to the console instead of sent (no credit burned); set `SMS_SEND_IN_DEV=true` to send for real |
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
@@ -97,7 +99,7 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 
 OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop SMS-bombing.
 
-> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, and logs a loud warning that the OTP is still the fixed `123456`. Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
+> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, **or if no OTP delivery path is configured** (no SMS provider and no SMTP, without an explicit `ALLOW_FIXED_OTP=true`). Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
 
 ## Tests, lint, backups
 
@@ -116,7 +118,7 @@ npm run build       # production build + PWA service worker
 ## Roadmap / when you go live
 
 - **Enable card payments** — add real `YOCO_SECRET_KEY` + `YOCO_WEBHOOK_SECRET`, set success/cancel URLs to your HTTPS domain.
-- **Real SMS OTP** — integrate an OTP/SMS provider (ClickSend, Twilio, Vonage, Africa's Talking…) in `backend/src/services/sms.js` and switch `auth.js` back to random per-request codes. Until then the code is fixed at `123456` in every environment.
+- **Real SMS OTP** — done: `SMS_PROVIDER=africastalking|twilio|clicksend` + credentials switches to random per-request codes sent by SMS. Keep `ALLOW_FIXED_OTP` unset in production.
 - **Real routing** — add a `GOOGLE_MAPS_API_KEY` for true road distances/ETAs.
 - **HTTPS hosting** — required for web push, in-app geolocation and secure payments. See `DEPLOY.md`.
 - **Driver payouts** — MVP pays 100% to the owner (single driver). Yoco payouts if you ever split fares.

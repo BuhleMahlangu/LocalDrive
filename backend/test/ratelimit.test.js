@@ -4,15 +4,21 @@ const assert = require('node:assert/strict');
 // The OTP *request* caps are relaxed outside production (no real SMS is sent
 // there), so the 3-per-minute production limit must be asserted against an
 // explicitly production-configured module. Reloading with a purged cache keeps
-// each environment's buckets and limits isolated.
+// each environment's buckets and limits isolated. ALLOW_FIXED_OTP is set
+// because these tests exercise rate limiting, not OTP delivery — production
+// config otherwise refuses to start without an SMS/SMTP delivery path.
 function loadRateLimit(nodeEnv) {
   const prev = process.env.NODE_ENV;
+  const prevFixed = process.env.ALLOW_FIXED_OTP;
   process.env.NODE_ENV = nodeEnv;
+  if (nodeEnv === 'production') process.env.ALLOW_FIXED_OTP = 'true';
   const path = require.resolve('../src/services/rateLimit');
   delete require.cache[path];
   delete require.cache[require.resolve('../src/config')];
   const mod = require('../src/services/rateLimit');
   process.env.NODE_ENV = prev;
+  if (prevFixed === undefined) delete process.env.ALLOW_FIXED_OTP;
+  else process.env.ALLOW_FIXED_OTP = prevFixed;
   return mod;
 }
 

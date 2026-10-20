@@ -40,20 +40,27 @@ async function requestOtp({ phone, role: _role, email: requestedEmail }) {
     throw err;
   }
 
-  // Determine whether we can deliver a real one-time code by email (SMTP) or
-  // fall back to the fixed interim code. We never log the plaintext code in
-  // production once a real provider is wired in.
+  // Deliver a real random one-time code: SMS to the requesting number when a
+  // provider is configured, else email (SMTP) if we have an address, else the
+  // interim fixed dev code. We never log the plaintext code once a real
+  // provider is wired in.
   const existingUser = repo.getUserByPhone(normalized) || repo.getUserByPhone(normalized, _role === 'driver' ? 'driver' : 'customer');
   const toEmail = String(requestedEmail || existingUser?.email || '').trim();
 
-  const smtpReady = email.isConfigured();
-  const canEmail = smtpReady && toEmail;
-  const code = canEmail ? String(crypto.randomInt(100000, 1000000)) : '123456';
+  const canSms = sms.deliversReal();
+  const canEmail = !canSms && email.isConfigured() && !!toEmail;
+  const realDelivery = canSms || canEmail;
+  const code = realDelivery ? String(crypto.randomInt(100000, 1000000)) : '123456';
   const expiresAt = new Date(Date.now() + OTP_TTL_MIN * 60 * 1000).toISOString();
 
   repo.saveOtp(normalized, hashOtp(normalized, code), expiresAt);
 
-  if (canEmail) {
+  if (canSms) {
+    await sms.send({
+      to: normalized,
+      body: `DriveLocal: your verification code is ${code}. Valid for ${OTP_TTL_MIN} minutes. Never share it with anyone.`,
+    });
+  } else if (canEmail) {
     await email.send({
       to: toEmail,
       subject: 'Your DriveLocal verification code',
@@ -67,7 +74,12 @@ async function requestOtp({ phone, role: _role, email: requestedEmail }) {
     });
   }
 
-  return { phone: normalized, expiresInSeconds: OTP_TTL_MIN * 60, dev: !canEmail, delivery: canEmail ? 'email' : 'console' };
+  return {
+    phone: normalized,
+    expiresInSeconds: OTP_TTL_MIN * 60,
+    dev: !realDelivery,
+    delivery: canSms ? 'sms' : canEmail ? 'email' : 'console',
+  };
 }
 
 function lookupUserByPhone(normalized, role) {

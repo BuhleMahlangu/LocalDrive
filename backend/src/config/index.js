@@ -45,6 +45,23 @@ const config = {
     from: process.env.SMTP_FROM || process.env.SMTP_USER || 'DriveLocal <no-reply@drivelocal.co.za>',
     replyTo: process.env.SMTP_REPLY_TO,
   },
+  // Real SMS OTP delivery (see services/sms.js). Set SMS_PROVIDER to one of
+  // 'africastalking' | 'twilio' | 'clicksend' plus that provider's credentials.
+  // In development, messages are logged to the console instead of sent unless
+  // SMS_SEND_IN_DEV=true (so local work never burns SMS credit).
+  sms: {
+    provider: process.env.SMS_PROVIDER,
+    sendInDev: process.env.SMS_SEND_IN_DEV === 'true',
+    atApiKey: process.env.AT_API_KEY,
+    atUsername: process.env.AT_USERNAME,
+    atSenderId: process.env.AT_SENDER_ID,
+    twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
+    twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
+    twilioFrom: process.env.TWILIO_FROM,
+    clicksendUser: process.env.CLICKSEND_USERNAME,
+    clicksendApiKey: process.env.CLICKSEND_API_KEY,
+    clicksendFrom: process.env.CLICKSEND_FROM || process.env.SMS_FROM,
+  },
   // Public OSRM demo server. Used whenever no GOOGLE_MAPS_API_KEY is configured
   // so routes follow real roads instead of a straight line. Point this at your
   // own OSRM instance (self-hosted or paid) for production traffic — the demo
@@ -53,6 +70,21 @@ const config = {
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
     .split(',').map((s) => s.trim()).filter(Boolean),
 };
+
+// Env-level readiness checks (kept here, not imported from sms.js/email.js, to
+// avoid a config <-> service circular import).
+function otpEmailReady() {
+  return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+}
+
+function otpSmsReady() {
+  switch (process.env.SMS_PROVIDER) {
+    case 'africastalking': return !!(process.env.AT_API_KEY && process.env.AT_USERNAME);
+    case 'twilio': return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
+    case 'clicksend': return !!(process.env.CLICKSEND_USERNAME && process.env.CLICKSEND_API_KEY);
+    default: return false;
+  }
+}
 
 // Fail fast in production: never run with a known default secret or without the
 // owner-driver phone configured.
@@ -64,12 +96,19 @@ if (nodeEnv === 'production') {
   if (!process.env.DRIVER_PHONE) {
     problems.push('DRIVER_PHONE must be set to the owner-driver phone in E.164 format');
   }
+  // A real login code needs a real delivery path: SMS (see services/sms.js) or
+  // email OTP via SMTP. Without one, the code stays the fixed 123456 and
+  // anyone can sign in as any number. ALLOW_FIXED_OTP=true is a deliberate,
+  // loud escape hatch for a private/closed beta.
+  if (!otpSmsReady() && !otpEmailReady() && process.env.ALLOW_FIXED_OTP !== 'true') {
+    problems.push('No OTP delivery path configured — set SMS_PROVIDER + credentials (see .env.example), or SMTP_HOST/SMTP_USER/SMTP_PASS for email OTP, or explicitly set ALLOW_FIXED_OTP=true for a closed beta');
+  }
   if (problems.length) {
     throw new Error(`DriveLocal refuses to start in production:\n - ${problems.join('\n - ')}`);
   }
-  // Non-fatal: the interim fixed OTP is deliberate until a provider lands, but
-  // it must be impossible to miss in the deploy logs.
-  console.warn('[config] ⚠ No SMS/OTP provider integrated — the verification code is fixed at 123456 for every number. Anyone who knows this can sign in as anyone. Integrate an OTP provider before real users.');
+  if (!otpSmsReady() && !otpEmailReady()) {
+    console.warn('[config] ⚠ ALLOW_FIXED_OTP=true — the verification code is fixed at 123456 for every number. Anyone who knows this can sign in as anyone. Do not expose this deployment publicly.');
+  }
 } else if (!jwtSecret || jwtSecret === 'dev-secret-change-me') {
   // Development convenience: keep running, but make it obvious the default secret
   // is in use so nobody accidentally ships it to a public server.

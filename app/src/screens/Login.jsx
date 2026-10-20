@@ -12,6 +12,9 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
   const [step, setStep] = useState('phone');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // How the last OTP was delivered: 'sms' | 'email' | 'console' (dev fallback).
+  const [delivery, setDelivery] = useState(null);
+  const [devMode, setDevMode] = useState(false);
 
   function handlePhone(e) {
     // Friendly live formatting for SA numbers as they type (keeps the raw input clean).
@@ -25,9 +28,8 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
     setLoading(true);
     try {
       const res = await api('/auth/otp/request', { method: 'POST', body: { phone, role, email: email.trim() || undefined } });
-      if (res && res.delivery === 'email') {
-        // Code delivered by email; no special UI change needed beyond the hint.
-      }
+      setDelivery(res?.delivery || 'sms');
+      setDevMode(!!res?.dev);
       setStep('code');
     } catch (err) {
       setError(err.message);
@@ -79,12 +81,18 @@ export default function Login({ role = 'customer', onLogin, onBack }) {
           </label>
           {error && <p className="error">{error}</p>}
           <button className={`btn ${isDriver ? 'driver' : 'primary'} big`} disabled={loading}>{loading ? t('login.sending') : t('login.requestCode')}</button>
-          <p className="hint">{t('login.devHint')}</p>
         </form>
       ) : (
         <form className="card animate-in" onSubmit={verify}>
           <h2>{t('login.enterCode')}</h2>
-          <p className="hint">{t('login.codeSent', { phone })}</p>
+          <p className="hint">
+            {delivery === 'email' && email.trim()
+              ? t('login.emailSent', { email: email.trim() })
+              : delivery === 'console'
+                ? t('login.codeSent', { phone })
+                : t('login.smsSent', { phone })}
+          </p>
+          {devMode && <p className="hint">{t('login.devHint')}</p>}
           <label>
             {t('login.verificationCode')}
             <input type="text" inputMode="numeric" maxLength="6" placeholder={t('login.codePh')} value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
