@@ -1,7 +1,38 @@
 // End-to-end smoke test for the DriveLocal backend.
-// Starts nothing itself - assumes the server is already running on PORT.
+// Starts nothing itself - assumes the server is already running on PORT, in dev
+// mode (so OTP codes are logged to the console rather than sent by SMS/email).
+const fs = require('fs');
+const path = require('path');
 const PORT = process.env.PORT || 4000;
 const BASE = `http://localhost:${PORT}`;
+
+// Where the running server's stdout lives, so we can read the dev OTP it logs:
+//   - SMS_LOG_FILE env var (explicit)
+//   - backend-dev.log in the repo root (the documented dev workflow
+//     `npm run dev > backend-dev.log`)
+// The dev code is only logged when no SMS/SMTP provider is active, which is the
+// normal local setup.
+function otpLogCandidates() {
+  return [
+    process.env.SMS_LOG_FILE,
+    path.join(__dirname, '..', '..', 'backend-dev.log'),
+    path.join(__dirname, '..', '..', 'dev.out.log'),
+  ].filter(Boolean);
+}
+
+function latestLoggedOtp(phone) {
+  for (const file of otpLogCandidates()) {
+    let content;
+    try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    // Lines look like: [sms] (dev mode — SMS not sent) To +27...: ...code is 123456...
+    const re = new RegExp(`To ${phone.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\D.*?(\\d{6})`, 'g');
+    let match;
+    let last = null;
+    while ((match = re.exec(content)) !== null) last = match[1];
+    if (last) return last;
+  }
+  return null;
+}
 
 async function api(method, path, body, token) {
   const headers = { 'Content-Type': 'application/json' };
@@ -20,21 +51,42 @@ function assert(cond, msg) {
   console.log('  ok:', msg);
 }
 
+// Customers must upload ID documents (ID number + ID copy + selfie) before their
+// first booking; the app shows the same flow before the booking screen opens.
+async function uploadCustomerIdentity(token, idNumber) {
+  const fd = new FormData();
+  fd.append('idNumber', idNumber);
+  fd.append('idCopy', new Blob(['fake-id-jpeg'], { type: 'image/jpeg' }), 'id.jpg');
+  fd.append('selfie', new Blob(['fake-selfie-png'], { type: 'image/png' }), 'selfie.png');
+  const res = await fetch(`${BASE}/api/customer/identity`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: fd,
+  });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+}
+
 async function login(phone, role, name, email) {
-  await api('POST', '/api/auth/otp/request', { phone, role });
-  const res = await api('POST', '/api/auth/otp/verify', { phone, code: '123456', role, name, email });
+  const requested = await api('POST', '/api/auth/otp/request', { phone, role });
+  // Prefer the real dev code the server just logged; fall back to the fixed
+  // interim code when a provider is configured to actually send.
+  const code = (requested.json && requested.json.dev && latestLoggedOtp(phone)) || '123456';
+  const res = await api('POST', '/api/auth/otp/verify', { phone, code, role, name, email });
   return res;
 }
 
 async function main() {
   console.log('== DriveLocal smoke test ==');
+  // The seeded owner-driver's phone (seed.js defaults to DRIVER_PHONE), so this
+  // works against a real deployment's owner number too — not just the demo one.
+  const driverPhone = process.env.DRIVER_PHONE || '+27000000000';
 
   console.log('\n[0] Public pickup spots');
   const spots = await api('GET', '/api/pickup-spots');
   assert(spots.status === 200 && Array.isArray(spots.json.spots) && spots.json.spots.length > 0, 'pickup spots listed');
 
   console.log('\n[1] Driver goes online');
-  const driver = await login('+27000000000', 'driver', 'Thabo', 'd@x.za');
+  const driver = await login(driverPhone, 'driver', 'Thabo', 'd@x.za');
   assert(driver.status === 200 && ['admin', 'driver'].includes(driver.json.user.role), 'driver OTP verify');
   const driverToken = driver.json.token;
 
@@ -72,6 +124,15 @@ async function main() {
   const customer = await login('+27730002222', 'customer', 'Naledi', 'n@x.za');
   assert(customer.status === 200 && customer.json.user.role === 'customer', 'customer OTP verify');
   const custToken = customer.json.token;
+
+  // Customers must upload ID documents before their first booking.
+  const idStatus = await api('GET', '/api/customer/identity', null, custToken);
+  if (idStatus.json.required) {
+    const up = await uploadCustomerIdentity(custToken, '9001015800088');
+    assert(up.status === 201, 'customer identity documents uploaded');
+  } else {
+    console.log('  ok: customer identity already on file');
+  }
 
   const book = await api('POST', '/api/customer/trips', {
     pickup: { lat: -26.2041, lng: 28.0473, address: 'Joburg CBD' },
@@ -123,6 +184,10 @@ async function main() {
 
   console.log('\n[10] Booking rejected when driver offline');
   const cust2 = await login('+27730003333', 'customer');
+  // New customer: satisfy the identity gate first so this asserts the *offline*
+  // rule (409 DRIVER_OFFLINE), not the missing-documents rule.
+  const idUp = await uploadCustomerIdentity(cust2.json.token, '8001015800089');
+  assert(idUp.status === 201, 'customer2 identity documents uploaded');
   const book2 = await api('POST', '/api/customer/trips', {
     pickup: { lat: -25.7461, lng: 28.1881, address: 'Pretoria' },
     destination: { lat: -25.7461, lng: 28.25, address: 'Centurion' },
@@ -136,7 +201,9 @@ async function main() {
   const p2 = await api('POST', '/api/customer/places', { label: 'Work', kind: 'work', address: 'Kriel Power Station', lat: -26.2, lng: 29.3 }, cust2.json.token);
   assert(p2.status === 201, 'save place (work)');
   const places = await api('GET', '/api/customer/places', null, cust2.json.token);
-  assert(places.json.length === 2 && places.json[0].kind === 'home', 'places listed homes first');
+  const savedHome = places.json.find((p) => p.id === p1.json.id);
+  assert(savedHome && savedHome.kind === 'home', 'saved home place listed');
+  assert(places.json.findIndex((p) => p.kind === 'home') === 0, 'homes sort first');
   const del = await api('DELETE', `/api/customer/places/${p2.json.id}`, null, cust2.json.token);
   assert(del.json.ok === true, 'place deleted');
 
@@ -156,7 +223,7 @@ async function main() {
   const schedList = await api('GET', '/api/driver/scheduled-trips', null, driverToken);
   assert(schedList.json.trips.some((t) => t.id === schedId), 'driver sees scheduled trip');
   const act = await api('POST', `/api/driver/trips/${schedId}/activate`, {}, driverToken);
-  assert(act.status === 200 && act.json.trip.status === 'requested', 'driver activated scheduled trip');
+  assert(act.status === 200 && act.json.trip.status === 'accepted' && act.json.trip.driverId, 'driver activated scheduled trip');
 
   // A second scheduled ride can be cancelled by the customer before activation.
   const sched2 = await api('POST', '/api/customer/trips', {
@@ -170,6 +237,15 @@ async function main() {
   assert(cancelled.status === 200 && cancelled.json.trip.status === 'cancelled', 'scheduled ride cancelled by customer');
   const schedList2 = await api('GET', '/api/driver/scheduled-trips', null, driverToken);
   assert(!schedList2.json.trips.some((t) => t.id === sched2.json.trip.id), 'cancelled ride left the driver list');
+
+  console.log('\n[12] Fare dispute (customer opens, owner resolves)');
+  const dispute = await api('POST', `/api/customer/trips/${tripId}/dispute`, { reason: 'Smoke test: fare looks wrong' }, custToken);
+  assert(dispute.status === 201 && dispute.json.dispute.status === 'open', 'customer opened a dispute');
+  const openDisputes = await api('GET', '/api/admin/disputes', null, driverToken);
+  const queued = openDisputes.json.disputes.find((d) => d.id === dispute.json.dispute.id);
+  assert(!!queued && queued.trip.finalFare > 0, 'dispute queued for the owner with trip context');
+  const resolved = await api('POST', `/api/admin/disputes/${dispute.json.dispute.id}/resolve`, { resolution: 'Smoke test: reviewed, fare stands' }, driverToken);
+  assert(resolved.status === 200 && resolved.json.dispute.status === 'resolved', 'owner resolved the dispute');
 
   console.log('\nAll smoke tests passed.');
 }

@@ -51,7 +51,9 @@ const config = {
   // SMS_SEND_IN_DEV=true (so local work never burns SMS credit).
   sms: {
     provider: process.env.SMS_PROVIDER,
-    sendInDev: process.env.SMS_SEND_IN_DEV === 'true',
+    // Force real sending in dev/test (used by the E2E smoke run to assert the
+    // exact HTTP request per provider). Without it dev/test log only.
+    force: process.env.SMS_FORCE === 'true',
     atApiKey: process.env.AT_API_KEY,
     atUsername: process.env.AT_USERNAME,
     atSenderId: process.env.AT_SENDER_ID,

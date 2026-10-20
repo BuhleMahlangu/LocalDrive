@@ -34,10 +34,10 @@ function deliversReal() {
 }
 
 // Development and test never send for real (no credit burned, no network in
-// CI) unless SMS_SEND_IN_DEV=true explicitly forces it.
+// CI) unless SMS_FORCE=true explicitly forces it.
 function consoleOnly() {
   const env = config.nodeEnv;
-  return !config.sms.sendInDev && (env === 'development' || env === 'test');
+  return !config.sms.force && (env === 'development' || env === 'test');
 }
 
 function providerName() {

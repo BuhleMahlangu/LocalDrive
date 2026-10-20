@@ -9,7 +9,7 @@ process.env.TWILIO_ACCOUNT_SID = 'AC123';
 process.env.TWILIO_AUTH_TOKEN = 'secret-token';
 process.env.TWILIO_FROM = '+27000000001';
 // Tests that exercise real dispatch must opt in: test env otherwise logs only.
-process.env.SMS_SEND_IN_DEV = 'true';
+process.env.SMS_FORCE = 'true';
 
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -67,9 +67,9 @@ test('send() throws with the provider message on a failed send', async () => {
 test('in development, a configured provider still logs instead of sending (no credit burn)', async () => {
   // Reload config + sms as if NODE_ENV=development without the opt-in flag.
   const prevEnv = process.env.NODE_ENV;
-  const prevForce = process.env.SMS_SEND_IN_DEV;
+  const prevForce = process.env.SMS_FORCE;
   process.env.NODE_ENV = 'development';
-  process.env.SMS_SEND_IN_DEV = '';
+  process.env.SMS_FORCE = '';
   for (const m of ['../src/config', '../src/services/sms']) {
     delete require.cache[require.resolve(m)];
   }
@@ -82,8 +82,8 @@ test('in development, a configured provider still logs instead of sending (no cr
     assert.equal(devSms.deliversReal(), false);
   } finally {
     process.env.NODE_ENV = prevEnv;
-    if (prevForce === undefined) delete process.env.SMS_SEND_IN_DEV;
-    else process.env.SMS_SEND_IN_DEV = prevForce;
+    if (prevForce === undefined) delete process.env.SMS_FORCE;
+    else process.env.SMS_FORCE = prevForce;
     for (const m of ['../src/config', '../src/services/sms']) {
       delete require.cache[require.resolve(m)];
     }
