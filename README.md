@@ -114,7 +114,7 @@ OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop S
 
 ```bash
 cd backend
-npm run seed        # create/update demo accounts + driver
+npm run seed        # create the owner/admin account (+ location)
 npm test            # unit tests (node --test, in-memory DB)
 npm run lint        # ESLint (also: cd app && npm run lint)
 npm run smoke       # end-to-end API test (server must be running first; run in dev mode so OTPs are logged)

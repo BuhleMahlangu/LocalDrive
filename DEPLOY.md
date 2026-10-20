@@ -38,7 +38,7 @@ cd /opt/drivelocal/backend
 npm install --omit=dev
 cp .env.example .env && chmod 600 .env
 # ... edit .env (see checklist below) ...
-npm run seed          # create the driver account + location
+npm run seed          # create the owner/admin account + location
 ```
 
 Run it with PM2 so it restarts (SystemD is an alternative):

@@ -1,58 +1,48 @@
-// Seeds a demo Driver account plus a demo Customer, with South African rates.
+// Creates the platform owner (admin driver) account so a fresh deploy has a
+// usable admin login. The owner then fills in their real name, vehicle and
+// rates from the Profile screen. No demo accounts or rates are created.
 const repo = require('../db/repository');
 const config = require('../config');
 
 function main() {
-  // Default the seeded driver to the platform owner (DRIVER_PHONE) so a fresh
-  // production deploy ends up with a usable admin account and driver profile.
-  // Override with SEED_DRIVER_PHONE if you want demo accounts instead.
+  // The owner is the platform admin (DRIVER_PHONE). Override with
+  // SEED_DRIVER_PHONE only if you deliberately want a different seed account.
   const adminPhone = process.env.SEED_DRIVER_PHONE || config.driverPhone;
-  const customerPhone = process.env.SEED_CUSTOMER_PHONE || '+27730002222';
-  const isProd = config.nodeEnv === 'production';
+  // An optional demo/companion customer, created only when explicitly requested.
+  const customerPhone = process.env.SEED_CUSTOMER_PHONE || null;
 
   // The admin/owner phone may already exist as a customer (single phone/row model).
   let driver = repo.getUserByPhone(adminPhone, undefined);
   if (!driver) {
     driver = repo.createUser({
       phone: adminPhone,
-      name: 'Thabo Driver',
-      email: 'driver@drivelocal.co.za',
+      name: '',
+      email: '',
       role: 'admin',
       driverStatus: 'approved',
     });
   } else if (driver.role !== 'admin') {
     repo.promoteToAdmin(driver.id);
     driver = repo.updateUserProfile(driver.id, {
-      name: driver.name || 'Thabo Driver',
-      email: driver.email || 'driver@drivelocal.co.za',
+      name: driver.name || '',
+      email: driver.email || '',
     });
   }
-  // Only fill in default profile fields when they're empty — never overwrite a
-  // driver's real vehicle/rates after they've set them in the Profile screen.
-  if (!driver.vehicle_type) {
-    driver = repo.updateUserProfile(driver.id, {
-      vehicle_type: 'Chevrolet Spark LT',
-      license_plate: 'XX 000 XX',
-      base_fare: 25,
-      per_km_rate: 12,
-      per_min_rate: 2.5,
-      service_radius_km: 50,
-    });
-  }
+  // Leave vehicle/rates empty for the owner to set in the Profile screen — the
+  // estimate engine falls back to platform defaults until they do.
   repo.createWalletIfMissing(driver.id);
-  console.log(`Driver ready: ${adminPhone} (${driver.role})`);
+  console.log(`Owner ready: ${adminPhone} (${driver.role})`);
 
-  // Skip the demo customer/console demo in production — only the owner-driver
-  // account is wanted on a live deploy.
-  if (isProd && !process.env.SEED_CUSTOMER_PHONE) {
-    console.log('Skipping demo customer (production).');
+  // Only create a customer when one is explicitly requested via SEED_CUSTOMER_PHONE.
+  if (!customerPhone) {
+    console.log('No customer seeded (set SEED_CUSTOMER_PHONE to create one).');
   } else {
     let customer = repo.getUserByPhone(customerPhone, 'customer');
     if (!customer) {
       customer = repo.createUser({
         phone: customerPhone,
-        name: 'Naledi Customer',
-        email: 'customer@example.co.za',
+        name: '',
+        email: '',
         role: 'customer',
       });
       console.log(`Customer created: ${customerPhone}`);
@@ -76,10 +66,10 @@ function main() {
     }
   }
 
-  console.log('\nSeeded demo accounts:');
-  console.log(`  Driver   -> ${adminPhone} (passwordless, OTP by SMS / console in dev)`);
-  console.log(`  Customer -> ${customerPhone}`);
-  console.log('\nRates: base R25.00, R12.00/km, R2.50/min, currency ZAR.');
+  console.log('\nSeed complete:');
+  console.log(`  Owner -> ${adminPhone} (passwordless, OTP by SMS / console in dev)`);
+  if (customerPhone) console.log(`  Customer -> ${customerPhone}`);
+  console.log('Set your name, vehicle and rates in the driver Profile screen.');
 }
 
 main();
