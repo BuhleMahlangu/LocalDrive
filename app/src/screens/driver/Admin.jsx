@@ -21,10 +21,11 @@ export default function Admin() {
         <button className={`btn small ${tab === 'records' ? 'driver' : ''}`} onClick={() => setTab('records')}>Records</button>
         <button className={`btn small ${tab === 'spots' ? 'driver' : ''}`} onClick={() => setTab('spots')}>Spots</button>
         <button className={`btn small ${tab === 'payouts' ? 'driver' : ''}`} onClick={() => setTab('payouts')}>Payouts</button>
+        <button className={`btn small ${tab === 'disputes' ? 'driver' : ''}`} onClick={() => setTab('disputes')}>Disputes</button>
         <button className={`btn small ${tab === 'ops' ? 'driver' : ''}`} onClick={() => setTab('ops')}>Ops</button>
         <button className={`btn small ${tab === 'settings' ? 'driver' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
-      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : tab === 'ops' ? <OpsTab /> : <SettingsTab />}
+      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : tab === 'disputes' ? <DisputesTab /> : tab === 'ops' ? <OpsTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -683,6 +684,10 @@ function TripAudit({ trip }) {
         </div>
       )}
 
+      {trip.dispute && (
+        <DisputeCard dispute={trip.dispute} />
+      )}
+
       {pay && (
         <div className="card" style={{ marginTop: '10px', padding: '10px' }}>
           <p className="hint" style={{ margin: '0 0 4px' }}>Payment</p>
@@ -807,6 +812,135 @@ function PayoutsTab() {
     </div>
   );
 }
+function DisputeCard({ dispute }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [resolved, setResolved] = useState(dispute.status !== 'open');
+  const [resolutionInput, setResolutionInput] = useState('');
+
+  const resolve = async () => {
+    setBusy(true);
+    setMessage('');
+    try {
+      await api(`/admin/disputes/${dispute.id}/resolve`, {
+        method: 'POST',
+        body: { resolution: resolutionInput.trim() || 'Reviewed by platform owner — fare stands' },
+      });
+      setResolved(true);
+      setMessage('Dispute resolved — the customer has been notified.');
+    } catch (e) { setMessage(e.message); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="card" style={{ marginTop: '10px', padding: '10px', border: '1px solid var(--warning)' }}>
+      <p className="hint" style={{ margin: '0 0 4px' }}>⚖️ Fare dispute ({resolved ? (dispute.status === 'open' ? 'resolved' : dispute.status) : 'open'})</p>
+      <p style={{ margin: 0 }}>
+        <strong>{dispute.reason || 'No reason provided'}</strong>
+        {dispute.trip?.finalFare != null && <> — disputed fare {formatRand(dispute.trip.finalFare)}</>}
+      </p>
+      {dispute.customer && (
+        <p className="hint" style={{ margin: '2px 0' }}>Raised by {dispute.customer.name || 'customer'} {dispute.customer.phone ? `· ${dispute.customer.phone}` : ''}</p>
+      )}
+      {!resolved ? (
+        <>
+          <textarea
+            value={resolutionInput}
+            onChange={(e) => setResolutionInput(e.target.value)}
+            placeholder="Resolution notes (shared with the customer)"
+            rows={2}
+            style={{ width: '100%', marginTop: '6px' }}
+          />
+          <div className="btn-row" style={{ marginTop: '6px' }}>
+            <button className="btn small primary" disabled={busy} onClick={resolve}>{busy ? 'Working…' : 'Resolve'}</button>
+          </div>
+        </>
+      ) : (
+        dispute.resolution && <p className="hint" style={{ margin: '4px 0 0' }}>Resolved: {dispute.resolution}</p>
+      )}
+      {message && <p className="hint" style={{ marginTop: '6px' }}>{message}</p>}
+    </div>
+  );
+}
+
+function DisputesTab() {
+  const [disputes, setDisputes] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [resolvingId, setResolvingId] = useState(null);
+  const [resolution, setResolution] = useState('');
+
+  const load = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const r = await api('/admin/disputes');
+      setDisputes(r.disputes || []);
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  async function resolve() {
+    if (!resolvingId) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      await api(`/admin/disputes/${resolvingId}/resolve`, {
+        method: 'POST',
+        body: { resolution: resolution.trim() || 'Reviewed by platform owner — fare stands' },
+      });
+      setMessage('Dispute resolved — the customer has been notified.');
+      setResolvingId(null);
+      setResolution('');
+      await load();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card">
+      <h3>Open fare disputes</h3>
+      <button className="btn small" onClick={load} disabled={busy}>Refresh</button>
+      {busy && <p className="hint">Loading…</p>}
+      {error && <p className="error">{error}</p>}
+      {message && <p className="success">{message}</p>}
+      {(!busy && disputes.length === 0) && <EmptyState title="No open disputes" message="Customer-raised disputes will appear here for review." />}
+      <ul className="list-compact">
+        {disputes.map((d) => (
+          <li key={d.id} className="dispute-row" style={{ display: 'block', marginBottom: '10px' }}>
+            <strong>{d.trip?.pickupAddress || 'Pickup'} → {d.trip?.destAddress || 'Drop-off'}</strong>
+            {' '}· {d.trip?.finalFare != null ? formatRand(d.trip.finalFare) : 'fare unknown'} · {fmt(d.createdAt)}
+            <p className="hint" style={{ margin: '2px 0' }}>
+              Reason: {d.reason || 'No reason provided'}
+              {d.customer && <> · Raised by {d.customer.name || 'customer'}{d.customer.phone ? ` (${d.customer.phone})` : ''}</>}
+            </p>
+            {resolvingId === d.id ? (
+              <>
+                <textarea
+                  value={resolution}
+                  onChange={(e) => setResolution(e.target.value)}
+                  placeholder="Resolution notes (shared with the customer)"
+                  rows={2}
+                  style={{ width: '100%' }}
+                />
+                <div className="btn-row" style={{ marginTop: '6px' }}>
+                  <button className="btn small primary" disabled={busy} onClick={resolve}>{busy ? 'Working…' : 'Confirm resolve'}</button>
+                  <button className="btn small" onClick={() => { setResolvingId(null); setResolution(''); }}>Cancel</button>
+                </div>
+              </>
+            ) : (
+              <button className="btn small primary" onClick={() => { setResolvingId(d.id); setResolution(''); }} disabled={busy}>Resolve</button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function OpsTab() {
   const [drivers, setDrivers] = useState([]);
   const [busy, setBusy] = useState(false);

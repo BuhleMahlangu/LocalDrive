@@ -118,6 +118,34 @@ function mapTrip(row) {
   };
 }
 
+// A dispute always travels with enough trip + customer context for the admin
+// UI to render it without a second lookup (fare, route, who raised it).
+function mapDispute(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    tripId: row.trip_id,
+    userId: row.user_id,
+    reason: row.reason,
+    status: row.status,
+    resolution: row.resolution,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at,
+    customer: row.customer_phone || row.customer_name
+      ? { name: row.customer_name, phone: row.customer_phone }
+      : null,
+    trip: row.final_fare != null || row.pickup_address || row.dest_address || row.trip_status
+      ? {
+          status: row.trip_status,
+          finalFare: row.final_fare,
+          pickupAddress: row.pickup_address,
+          destAddress: row.dest_address,
+          requestedAt: row.requested_at,
+        }
+      : null,
+  };
+}
+
 function mapPayment(row) {
   if (!row) return null;
   return {
@@ -806,6 +834,7 @@ module.exports = {
       driver: { name: row.drv_name, phone: row.drv_phone },
       driverLastLocation: row.driver_id ? this.getDriverLocation(row.driver_id) : null,
       sosAlerts: this.getSosAlertsForTrip(tripId),
+      dispute: this.getDisputeByTrip(tripId),
       payment: this.getPaymentByTrip(tripId),
       messages: this.getTripMessages(tripId, 200).map((m) => {
         const sender = m.senderId === row.customer_id
@@ -1128,20 +1157,50 @@ module.exports = {
   createDispute({ tripId, userId, reason }) {
     const id = uid('disp');
     db.prepare('INSERT INTO fare_disputes (id, trip_id, user_id, reason) VALUES (?, ?, ?, ?)').run(id, tripId, userId, reason || null);
-    return db.prepare('SELECT * FROM fare_disputes WHERE id = ?').get(id);
+    return this.getDisputeById(id);
+  },
+
+  getDisputeById(id) {
+    const row = db.prepare(
+      `SELECT d.*, t.final_fare, t.status AS trip_status,
+              t.pickup_address, t.dest_address, t.requested_at,
+              u.name AS customer_name, u.phone AS customer_phone
+       FROM fare_disputes d
+       LEFT JOIN trips t ON t.id = d.trip_id
+       LEFT JOIN users u ON u.id = d.user_id
+       WHERE d.id = ?`,
+    ).get(id);
+    return mapDispute(row);
   },
 
   getDisputeByTrip(tripId) {
-    return db.prepare('SELECT * FROM fare_disputes WHERE trip_id = ? ORDER BY created_at DESC LIMIT 1').get(tripId);
+    const row = db.prepare(
+      `SELECT d.*, t.final_fare, t.status AS trip_status,
+              t.pickup_address, t.dest_address, t.requested_at,
+              u.name AS customer_name, u.phone AS customer_phone
+       FROM fare_disputes d
+       LEFT JOIN trips t ON t.id = d.trip_id
+       LEFT JOIN users u ON u.id = d.user_id
+       WHERE d.trip_id = ? ORDER BY d.created_at DESC LIMIT 1`,
+    ).get(tripId);
+    return mapDispute(row);
   },
 
   resolveDispute(id, resolution) {
-    db.prepare("UPDATE fare_disputes SET status = 'resolved', resolution = ?, resolved_at = datetime('now') WHERE id = ?").run(resolution, id);
-    return db.prepare('SELECT * FROM fare_disputes WHERE id = ?').get(id);
+    db.prepare("UPDATE fare_disputes SET status = 'resolved', resolution = ?, resolved_at = datetime('now') WHERE id = ? AND status = 'open'").run(resolution, id);
+    return this.getDisputeById(id);
   },
 
   listOpenDisputes() {
-    return db.prepare("SELECT * FROM fare_disputes WHERE status = 'open' ORDER BY created_at DESC").all();
+    return db.prepare(
+      `SELECT d.*, t.final_fare, t.status AS trip_status,
+              t.pickup_address, t.dest_address, t.requested_at,
+              u.name AS customer_name, u.phone AS customer_phone
+       FROM fare_disputes d
+       LEFT JOIN trips t ON t.id = d.trip_id
+       LEFT JOIN users u ON u.id = d.user_id
+       WHERE d.status = 'open' ORDER BY d.created_at DESC`,
+    ).all().map(mapDispute);
   },
 
   // ---------- Promo codes ----------

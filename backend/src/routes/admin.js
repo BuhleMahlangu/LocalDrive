@@ -1,6 +1,7 @@
 const { Router } = require('express');
 const repo = require('../db/repository');
 const { authRequired, adminOnly } = require('../middleware');
+const push = require('../services/push');
 
 // Platform owner administration. Mounted at /api/admin and only reachable by
 // the role 'admin' owner account (the same person who also drives).
@@ -257,6 +258,27 @@ router.delete('/spots/:id', (req, res, next) => {
         repo.adjustWallet(payout.driverId, { availableCents: -payout.amountCents });
       }
       res.json({ payout: updated });
+    } catch (e) { next(e); }
+  });
+
+  // ---------- Fare disputes ----------
+  router.get('/disputes', (_req, res) => {
+    res.json({ disputes: repo.listOpenDisputes() });
+  });
+
+  router.post('/disputes/:id/resolve', (req, res, next) => {
+    try {
+      const resolution = (req.body && req.body.resolution) || 'Resolved by platform owner';
+      const dispute = repo.resolveDispute(req.params.id, resolution);
+      if (dispute && dispute.userId) {
+        // Tell the customer who raised it that the review is done.
+        push.sendToUser(dispute.userId, {
+          title: 'Fare dispute resolved',
+          body: `Your dispute on trip ${dispute.tripId} was reviewed: ${resolution}`,
+          data: { type: 'dispute', tripId: dispute.tripId },
+        });
+      }
+      res.json({ ok: true, dispute });
     } catch (e) { next(e); }
   });
 

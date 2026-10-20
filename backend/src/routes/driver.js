@@ -6,6 +6,7 @@ const tripService = require('../services/trips');
 const payments = require('../services/payments');
 const pricing = require('../services/pricing');
 const uploadsService = require('../services/uploads');
+const push = require('../services/push');
 
 function driverRoutes({ notify }) {
   const router = Router();
@@ -295,6 +296,14 @@ function driverRoutes({ notify }) {
     try {
       const { resolution } = req.body;
       const dispute = repo.resolveDispute(req.params.id, resolution || 'Resolved');
+      if (dispute && dispute.userId) {
+        // Tell the customer who raised it that the review is done.
+        push.sendToUser(dispute.userId, {
+          title: 'Fare dispute resolved',
+          body: `Your dispute on trip ${dispute.tripId} was reviewed: ${dispute.resolution}`,
+          data: { type: 'dispute', tripId: dispute.tripId },
+        });
+      }
       res.json({ dispute });
     } catch (e) { next(e); }
   });
