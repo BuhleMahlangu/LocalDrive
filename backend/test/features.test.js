@@ -20,6 +20,8 @@ repo.saveDriverApplication(driver.id, {
   selfiePath: `${driver.id}_selfie.jpg`,
   proofOfResidencePath: `${driver.id}_proof.jpg`,
 });
+// Active subscription so the freemium gate (subscription.test.js) is satisfied.
+repo.recordSubscriptionPayment(driver.id, { amountCents: 29900, months: 1, method: 'manual' });
 repo.setDriverOnline(driver.id, true);
 repo.upsertDriverLocation(driver.id, { lat: -26.2155, lng: 29.2916, heading: 0, accuracy: 15 });
 const customer = repo.createUser({ phone: '+27830000002', name: 'Customer Naledi', role: 'customer' });

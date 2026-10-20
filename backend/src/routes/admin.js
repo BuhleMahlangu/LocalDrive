@@ -282,6 +282,86 @@ router.delete('/spots/:id', (req, res, next) => {
     } catch (e) { next(e); }
   });
 
+  // ---------- Driver subscriptions (freemium model) ----------
+  // The owner (this admin account) drives free forever; every other driver needs
+  // an active paid period to receive bookings. These routes let the owner set a
+  // plan, record a payment (which extends the period) and suspend/reactivate.
+  router.get('/subscriptions', (_req, res) => {
+    const drivers = repo.listDriversForAdmin().map((d) => ({
+      driverId: d.user.id,
+      name: d.user.name,
+      phone: d.user.phone,
+      role: d.user.role,
+      subscription: repo.getSubscription(d.user.id),
+    }));
+    res.json({ subscriptions: drivers });
+  });
+
+  router.get('/drivers/:id/subscription', (req, res, next) => {
+    try {
+      const driver = repo.getUserById(req.params.id);
+      if (!driver || !['driver', 'admin'].includes(driver.role)) {
+        const err = new Error('Driver not found');
+        err.status = 404;
+        return next(err);
+      }
+      res.json({
+        subscription: repo.getSubscription(driver.id),
+        payments: repo.listSubscriptionPayments(driver.id),
+      });
+    } catch (e) { next(e); }
+  });
+
+  // Set the plan/price for a driver. Plan 'free' marks them exempt (owner-only
+  // in practice); 'active' with a price is the normal paid plan.
+  router.post('/drivers/:id/subscription/plan', (req, res, next) => {
+    try {
+      const { plan, priceCents } = req.body || {};
+      if (!['free', 'active', 'unpaid'].includes(plan)) {
+        const err = new Error('plan must be one of free, active, unpaid');
+        err.status = 400;
+        return next(err);
+      }
+      const subscription = repo.setSubscriptionPlan(req.params.id, { plan, priceCents });
+      res.json({ subscription });
+    } catch (e) { next(e); }
+  });
+
+  // Record a subscription payment received (EFT/cash/card) and extend the period.
+  router.post('/drivers/:id/subscription/payment', (req, res, next) => {
+    try {
+      const { amountCents, months, method, reference } = req.body || {};
+      const amt = Number(amountCents);
+      if (!Number.isFinite(amt) || amt < 0) {
+        const err = new Error('amountCents must be a non-negative number');
+        err.status = 400;
+        return next(err);
+      }
+      const subscription = repo.recordSubscriptionPayment(req.params.id, {
+        amountCents: Math.round(amt),
+        months: Number(months) || 1,
+        method: method || 'manual',
+        reference,
+        recordedBy: req.user.id,
+      });
+      res.status(201).json({ subscription, payments: repo.listSubscriptionPayments(req.params.id) });
+    } catch (e) { next(e); }
+  });
+
+  // Suspend (payment lapsed / policy) or reactivate a driver's subscription.
+  router.post('/drivers/:id/subscription/status', (req, res, next) => {
+    try {
+      const { status } = req.body || {};
+      if (!['active', 'suspended', 'unpaid'].includes(status)) {
+        const err = new Error('status must be one of active, suspended, unpaid');
+        err.status = 400;
+        return next(err);
+      }
+      const subscription = repo.setSubscriptionStatus(req.params.id, status);
+      res.json({ subscription });
+    } catch (e) { next(e); }
+  });
+
   return router;
 }
 

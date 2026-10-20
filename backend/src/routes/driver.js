@@ -174,9 +174,22 @@ function driverRoutes({ notify }) {
           code: 'DOCUMENTS_REQUIRED',
         });
       }
+      // Freemium gate: only the owner drives free; others need an active plan.
+      if (isOnline && req.user.role !== 'admin' && !repo.getSubscription(req.user.id).active) {
+        return res.status(402).json({
+          error: 'Your driver subscription is not active. Renew to go online and receive bookings.',
+          code: 'SUBSCRIPTION_INACTIVE',
+          subscription: repo.getSubscription(req.user.id),
+        });
+      }
       const driver = repo.setDriverOnline(req.user.id, !!isOnline);
       res.json(driver);
     } catch (e) { next(e); }
+  });
+
+  // Current subscription (plan, period end, whether they may receive bookings).
+  router.get('/subscription', (req, res) => {
+    res.json({ subscription: repo.getSubscription(req.user.id), payments: repo.listSubscriptionPayments(req.user.id) });
   });
 
   // Report current GPS location (also streamed via socket.io).

@@ -226,6 +226,8 @@ async function createTrip({ customerId, pickup, destination, priceModel = 'dista
 function activateScheduledTrip(tripId, driverId) {
   // Identity gate: claiming a scheduled ride counts as taking a ride.
   assertDriverIdentity(driverId);
+  // Freemium gate: only subscribed drivers (or the free owner) take rides.
+  assertDriverSubscription(driverId);
   const trip = repo.activateScheduledTripClaim(tripId, driverId);
   if (trip && trip.promoCode) {
     const promo = repo.getPromoByCode(trip.promoCode);
@@ -275,6 +277,9 @@ async function acceptTrip(tripId, driverId) {
   // Identity gate: no rides until the driver has uploaded an ID copy + selfie.
   // One choke point covers both the REST endpoint and the socket handler.
   assertDriverIdentity(driverId);
+  // Freemium gate: identity first (safety), then the subscription check — also
+  // here so the socket accept path is covered, not just the REST route.
+  assertDriverSubscription(driverId);
   // Atomic first-wins claim: if another driver already accepted (or the
   // customer cancelled), claimTrip returns null and the loser gets a 409.
   const updated = repo.claimTrip(tripId, driverId);
@@ -294,6 +299,22 @@ function assertDriverIdentity(driverId) {
     const err = new Error('Upload your identification documents before taking rides');
     err.status = 403;
     err.code = 'DOCUMENTS_REQUIRED';
+    throw err;
+  }
+}
+
+// Freemium gate for accept/activate: the owner (role 'admin') drives free;
+// every other driver needs an active subscription. Runs after the identity gate
+// so safety comes first. 402 Payment Required signals "renew to take rides".
+function assertDriverSubscription(driverId) {
+  const driver = repo.getUserById(driverId);
+  if (!driver || driver.role === 'admin') return;
+  const sub = repo.getSubscription(driverId);
+  if (!sub.active) {
+    const err = new Error('Your driver subscription is not active. Renew to receive bookings.');
+    err.status = 402;
+    err.code = 'SUBSCRIPTION_INACTIVE';
+    err.subscription = sub;
     throw err;
   }
 }
@@ -387,7 +408,8 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
   // Create the payment record. Cash trips are settled now (money handed
   // directly to the driver). Card trips stay pending until the customer
   // completes the hosted Yoco checkout.
-  const platformFeeCents = Math.round(pricing.dollarsToCents(total) * (platformFeePercent() / 100));
+  // No per-ride commission: drivers keep the full fare; the platform earns via
+  // driver subscriptions, so platformFeeCents is always 0.
   repo.createPayment({
     tripId,
     amountCents: pricing.dollarsToCents(total),
@@ -397,8 +419,8 @@ async function completeTrip(tripId, driverId, { actualDistanceKm, actualDuration
 
   if (trip.paymentMethod !== 'card') {
     repo.markPaymentSucceeded(tripId, {
-      driverPayoutCents: pricing.dollarsToCents(total) - platformFeeCents,
-      platformFeeCents,
+      driverPayoutCents: pricing.dollarsToCents(total),
+      platformFeeCents: 0,
     });
   }
 
@@ -494,10 +516,9 @@ async function rateTrip(tripId, customerId, stars, tipAmount, feedbackTags) {
     if (payment && payment.provider === 'cash') {
       repo.updatePaymentAmount(tripId, pricing.dollarsToCents(total));
       if (payment.status !== 'succeeded') {
-        const platformFeeCents = Math.round(pricing.dollarsToCents(total) * (platformFeePercent() / 100));
         repo.markPaymentSucceeded(tripId, {
-          driverPayoutCents: pricing.dollarsToCents(total) - platformFeeCents,
-          platformFeeCents,
+          driverPayoutCents: pricing.dollarsToCents(total),
+          platformFeeCents: 0,
         });
       }
     }

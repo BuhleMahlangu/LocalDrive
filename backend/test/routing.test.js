@@ -100,6 +100,9 @@ function ensureDriver() {
     driver = repo.createUser({ phone: DRIVER_PHONE, name: 'Thabo', email: 'd@x.za', role: 'driver' });
   }
   seedDriverDocs(driver.id);
+  // Subscription gate is exercised in subscription.test.js; here give the test
+  // driver an active plan so the routing assertions aren't blocked by it.
+  repo.recordSubscriptionPayment(driver.id, { amountCents: 29900, months: 1, method: 'manual' });
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 

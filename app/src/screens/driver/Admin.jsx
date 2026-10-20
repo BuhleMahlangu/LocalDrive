@@ -21,11 +21,12 @@ export default function Admin() {
         <button className={`btn small ${tab === 'records' ? 'driver' : ''}`} onClick={() => setTab('records')}>Records</button>
         <button className={`btn small ${tab === 'spots' ? 'driver' : ''}`} onClick={() => setTab('spots')}>Spots</button>
         <button className={`btn small ${tab === 'payouts' ? 'driver' : ''}`} onClick={() => setTab('payouts')}>Payouts</button>
+        <button className={`btn small ${tab === 'subscriptions' ? 'driver' : ''}`} onClick={() => setTab('subscriptions')}>Subscriptions</button>
         <button className={`btn small ${tab === 'disputes' ? 'driver' : ''}`} onClick={() => setTab('disputes')}>Disputes</button>
         <button className={`btn small ${tab === 'ops' ? 'driver' : ''}`} onClick={() => setTab('ops')}>Ops</button>
         <button className={`btn small ${tab === 'settings' ? 'driver' : ''}`} onClick={() => setTab('settings')}>Settings</button>
       </div>
-      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : tab === 'disputes' ? <DisputesTab /> : tab === 'ops' ? <OpsTab /> : <SettingsTab />}
+      {tab === 'drivers' ? <DriversTab /> : tab === 'records' ? <RecordsTab /> : tab === 'spots' ? <SpotsTab /> : tab === 'payouts' ? <PayoutsTab /> : tab === 'subscriptions' ? <SubscriptionsTab /> : tab === 'disputes' ? <DisputesTab /> : tab === 'ops' ? <OpsTab /> : <SettingsTab />}
     </div>
   );
 }
@@ -127,6 +128,15 @@ function DriversTab() {
             </div>
 
             {app?.idNumber && <p className="hint" style={{ margin: '6px 0' }}>ID: {app.idNumber}</p>}
+            {d.subscription && (
+              <p className="hint" style={{ margin: '4px 0' }}>
+                Subscription: {d.subscription.plan === 'free'
+                  ? 'free (owner)'
+                  : d.subscription.active
+                    ? `active${d.subscription.periodEnd ? ` · renews ${new Date(d.subscription.periodEnd).toLocaleDateString()}` : ''}`
+                    : 'not active'}
+              </p>
+            )}
             {(isRejected || isSuspended) && u.rejectionReason && <p className="hint" style={{ margin: '4px 0' }}>Reason: {u.rejectionReason}</p>}
 
             {app && (
@@ -187,6 +197,149 @@ function DocLink({ url, label }) {
       {label}
       {err && <em style={{ color: 'var(--danger)' }}> ({err})</em>}
     </a>
+  );
+}
+
+// Driver subscriptions (freemium): each non-owner driver needs an active paid
+// period to go online and take rides. The owner records manual payments (EFT /
+// cash) here and can suspend or reactivate a plan.
+function SubscriptionsTab() {
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [amount, setAmount] = useState('299');
+  const [months, setMonths] = useState('1');
+  const [reference, setReference] = useState('');
+
+  async function load() {
+    try {
+      const res = await api('/admin/subscriptions');
+      setRows(res.subscriptions || []);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  useEffect(() => { load(); }, []);
+
+  async function recordPayment(id) {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const cents = Math.round(parseFloat(amount) * 100);
+      if (!Number.isFinite(cents) || cents < 0) throw new Error('Enter a valid amount');
+      await api(`/admin/drivers/${id}/subscription/payment`, {
+        method: 'POST',
+        body: {
+          amountCents: cents,
+          months: parseInt(months, 10) || 1,
+          method: 'manual',
+          reference: reference.trim() || undefined,
+        },
+      });
+      setMessage('Payment recorded — the driver\'s plan is now active.');
+      setEditing(null);
+      setReference('');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setStatus(id, status) {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await api(`/admin/drivers/${id}/subscription/status`, { method: 'POST', body: { status } });
+      setMessage(status === 'suspended' ? 'Subscription suspended — the driver cannot receive bookings.' : 'Subscription re-activated.');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!rows) return <p className="hint">Loading subscriptions…</p>;
+
+  // Owners (role admin) are free forever and need no management UI.
+  const drivers = rows.filter((r) => r.role !== 'admin');
+
+  return (
+    <>
+      {message && <p className="success">{message}</p>}
+      {error && <p className="error">{error}</p>}
+      <p className="hint">
+        Drivers pay a monthly subscription for the platform instead of a per-ride
+        commission, so cash rides are covered too. Record a payment to extend a
+        driver's access; suspend to cut it off.
+      </p>
+
+      {drivers.length === 0 && <p className="hint">No driver subscriptions yet.</p>}
+
+      {drivers.map((r) => {
+        const s = r.subscription || {};
+        const end = s.periodEnd ? new Date(s.periodEnd) : null;
+        const active = !!s.active;
+        return (
+          <div className="card" key={r.driverId}>
+            <div className="field-row" style={{ justifyContent: 'space-between' }}>
+              <div>
+                <strong>{r.name || 'Unnamed driver'}</strong>
+                <p className="hint" style={{ margin: '2px 0 0' }}>{r.phone}</p>
+              </div>
+              <span className={`badge ${active ? 'completed' : 'cancelled'}`}>
+                {s.plan === 'free' ? 'Free' : active ? 'Active' : 'Inactive'}
+              </span>
+            </div>
+
+            <p className="hint" style={{ margin: '6px 0' }}>
+              Plan: {s.plan || 'unpaid'}
+              {s.priceCents ? ` · ${formatRand(s.priceCents / 100)}` : ''}
+              {end ? ` · renews ${end.toLocaleDateString()}` : ' · no paid period'}
+            </p>
+
+            {editing === r.driverId ? (
+              <div style={{ marginTop: '8px' }}>
+                <div className="field-row" style={{ flexWrap: 'wrap', gap: 8 }}>
+                  <span className="field">
+                    <span className="field-label">Amount (R)</span>
+                    <input style={{ width: 90 }} type="number" min="0" step="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
+                  </span>
+                  <span className="field">
+                    <span className="field-label">Months</span>
+                    <input style={{ width: 70 }} type="number" min="1" step="1" value={months} onChange={(e) => setMonths(e.target.value)} />
+                  </span>
+                  <span className="field">
+                    <span className="field-label">Reference</span>
+                    <input type="text" placeholder="EFT / cash ref" value={reference} onChange={(e) => setReference(e.target.value)} />
+                  </span>
+                </div>
+                <div className="btn-row" style={{ marginTop: 8 }}>
+                  <button className="btn small primary" disabled={busy} onClick={() => recordPayment(r.driverId)}>Record payment</button>
+                  <button className="btn small" onClick={() => { setEditing(null); setReference(''); }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="btn-row" style={{ marginTop: '8px' }}>
+                <button className="btn small primary" disabled={busy} onClick={() => { setEditing(r.driverId); setReference(''); }}>Record payment</button>
+                {active ? (
+                  <button className="btn small danger" disabled={busy} onClick={() => setStatus(r.driverId, 'suspended')}>Suspend</button>
+                ) : (
+                  <button className="btn small" disabled={busy} onClick={() => setStatus(r.driverId, 'active')}>Reactivate</button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 

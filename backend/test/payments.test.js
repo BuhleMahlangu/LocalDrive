@@ -159,6 +159,8 @@ function ensureDriver() {
     proofOfResidencePath: `${driver.id}_proof.jpg`,
   });
   repo.setDriverOnline(driver.id, true);
+  // Active subscription keeps the freemium gate out of the payments tests.
+  repo.recordSubscriptionPayment(driver.id, { amountCents: 29900, months: 1, method: 'manual' });
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 
@@ -221,8 +223,9 @@ test('card trip: hosted checkout, confirm, and refund flow', async () => {
   const checkoutId = checkout.json.checkoutId;
   assert.equal(checkout.json.paid, false);
 
-  // Platform fee must be read from the runtime setting at finalisation time,
-  // not the env default, so flip it before the payment is marked succeeded.
+  // Monetisation is via driver subscriptions now: no per-ride commission, so
+  // the driver keeps the full fare regardless of the legacy platform_fee_percent
+  // setting (which is no longer applied to rides).
   repo.setSetting('platform_fee_percent', '25');
 
   // Simulate the customer finishing the hosted page, then confirm.
@@ -234,9 +237,8 @@ test('card trip: hosted checkout, confirm, and refund flow', async () => {
   assert.equal(paid.status, 'succeeded');
   assert.equal(paid.amountCents, Math.round(confirm.json.trip.finalFare * 100));
 
-  const fee = Math.round(paid.amountCents * 0.25);
-  assert.equal(paid.platformFeeCents, fee);
-  assert.equal(paid.driverPayoutCents, paid.amountCents - fee);
+  assert.equal(paid.platformFeeCents, 0, 'no per-ride commission');
+  assert.equal(paid.driverPayoutCents, paid.amountCents, 'the driver keeps the whole fare');
 
   // A second confirm must be idempotent (no new checkout / re-charge).
   const again = await api('POST', '/api/payments/confirm', { tripId }, customer);

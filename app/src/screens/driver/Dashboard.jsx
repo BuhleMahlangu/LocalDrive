@@ -63,6 +63,10 @@ export default function Dashboard({ user, onUserUpdate }) {
   // Identity gate: approved drivers still need an ID copy + selfie on file
   // (legacy accounts approved before the gate shipped are missing both).
   const [needsDocs, setNeedsDocs] = useState(false);
+  // Freemium gate: a driver with no active subscription cannot go online. The
+  // backend answers 402 SUBSCRIPTION_INACTIVE; surface a renewal prompt instead
+  // of a dead-end error.
+  const [needsSubscription, setNeedsSubscription] = useState(false);
   const [showDocsForm, setShowDocsForm] = useState(false);
   const [docsIdNumber, setDocsIdNumber] = useState('');
   const [docsIdCopy, setDocsIdCopy] = useState(null);
@@ -186,6 +190,14 @@ export default function Dashboard({ user, onUserUpdate }) {
     if (user.role !== 'driver') return;
     api('/driver/application')
       .then((r) => setNeedsDocs(!(r.application?.idCopyUrl && r.application?.selfieUrl)))
+      .catch(() => {});
+  }, [user.role, user.driverStatus]);
+
+  // And whether their subscription is active (the owner drives free).
+  useEffect(() => {
+    if (user.role !== 'driver') return;
+    api('/driver/subscription')
+      .then((r) => setNeedsSubscription(!(r.subscription?.active)))
       .catch(() => {});
   }, [user.role, user.driverStatus]);
 
@@ -358,6 +370,8 @@ export default function Dashboard({ user, onUserUpdate }) {
       // The identity gate refused — surface the upload card instead of a
       // silent dead end.
       if (e.code === 'DOCUMENTS_REQUIRED') setNeedsDocs(true);
+      // The freemium gate refused — point them at renewal.
+      if (e.code === 'SUBSCRIPTION_INACTIVE') setNeedsSubscription(true);
       setError(e.message);
     }
     finally { setBusy(false); }
@@ -476,7 +490,11 @@ export default function Dashboard({ user, onUserUpdate }) {
       pendingIdRef.current = null;
       refresh();
       setToast(action === 'accept' ? 'Trip accepted' : 'Declined');
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      // The freemium gate blocks accepting without an active subscription.
+      if (e.code === 'SUBSCRIPTION_INACTIVE') setNeedsSubscription(true);
+      setError(e.message);
+    }
     finally { setBusy(false); }
   }
 
@@ -492,7 +510,10 @@ export default function Dashboard({ user, onUserUpdate }) {
         setToast('Scheduled ride claimed — start when the customer is in ✔');
       }
       refresh();
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      if (e.code === 'SUBSCRIPTION_INACTIVE') setNeedsSubscription(true);
+      setError(e.message);
+    }
     finally { setBusy(false); }
   }
 
@@ -574,10 +595,21 @@ export default function Dashboard({ user, onUserUpdate }) {
           <p className="subtitle">{online ? 'Customers can see you and book rides' : 'Customers will see "driver unavailable"'}</p>
         </div>
         <label className="switch">
-          <input type="checkbox" checked={online} onChange={toggleOnline} disabled={busy || (needsDocs && !online)} />
+          <input type="checkbox" checked={online} onChange={toggleOnline} disabled={busy || ((needsDocs || needsSubscription) && !online)} />
           <span className="slider" />
         </label>
       </div>
+
+      {needsSubscription && (
+        <div className="card" style={{ background: 'var(--danger-soft)', border: '1px solid var(--danger)' }}>
+          <h3>💳 Subscription needed</h3>
+          <p className="hint">
+            DriveLocal is billed as a monthly driver subscription instead of a cut of
+            each ride. Renew your plan to go online and receive bookings — open the
+            Subscription tab to see your status and payment history.
+          </p>
+        </div>
+      )}
 
       {needsDocs && (
         <div className="card">

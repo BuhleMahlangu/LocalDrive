@@ -348,6 +348,29 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
     owed_cents      INTEGER NOT NULL DEFAULT 0,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  -- Driver subscription: freemium model. The owner (config.driverPhone) is
+  -- 'free' forever; other drivers need an active paid period to receive
+  -- bookings. period_end in the future = active; 'suspended' blocks dispatch.
+  CREATE TABLE IF NOT EXISTS driver_subscriptions (
+    driver_id        TEXT PRIMARY KEY,
+    plan             TEXT NOT NULL DEFAULT 'unpaid',
+    status           TEXT NOT NULL DEFAULT 'unpaid',
+    price_cents      INTEGER NOT NULL DEFAULT 0,
+    period_start     TEXT,
+    period_end       TEXT,
+    last_payment_ref TEXT,
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS subscription_payments (
+    id             TEXT PRIMARY KEY,
+    driver_id      TEXT NOT NULL,
+    amount_cents   INTEGER NOT NULL DEFAULT 0,
+    method         TEXT NOT NULL DEFAULT 'manual',
+    reference      TEXT,
+    months         INTEGER NOT NULL DEFAULT 1,
+    recorded_by    TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
   CREATE TABLE IF NOT EXISTS customer_documents (
     customer_id    TEXT PRIMARY KEY,
     id_number      TEXT NOT NULL,
@@ -398,11 +421,42 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
       "SELECT id FROM users WHERE role IN ('admin','driver') AND COALESCE(driver_status,'approved') = 'approved'",
     ).all();
     const ensureWallet = sqliteDb.prepare('INSERT OR IGNORE INTO driver_wallets (driver_id) VALUES (?)');
-    for (const d of approved) ensureWallet.run(d.id);
+    const ensureSub = sqliteDb.prepare('INSERT OR IGNORE INTO driver_subscriptions (driver_id) VALUES (?)');
+    for (const d of approved) {
+      ensureWallet.run(d.id);
+      ensureSub.run(d.id);
+    }
   }
+
+  // Freemium: the platform owner (role 'admin', i.e. config.driverPhone) never
+  // pays. Backfill/repair that here so it holds on existing databases too.
+  sqliteDb.prepare(
+    `UPDATE driver_subscriptions SET plan = 'free', status = 'active', updated_at = datetime('now')
+     WHERE driver_id IN (SELECT id FROM users WHERE role = 'admin') AND plan != 'free'`,
+  ).run();
 
   // ---- Ensure new tables exist for older databases ----
   sqliteDb.exec(`
+  CREATE TABLE IF NOT EXISTS driver_subscriptions (
+    driver_id        TEXT PRIMARY KEY,
+    plan             TEXT NOT NULL DEFAULT 'unpaid',
+    status           TEXT NOT NULL DEFAULT 'unpaid',
+    price_cents      INTEGER NOT NULL DEFAULT 0,
+    period_start     TEXT,
+    period_end       TEXT,
+    last_payment_ref TEXT,
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS subscription_payments (
+    id             TEXT PRIMARY KEY,
+    driver_id      TEXT NOT NULL,
+    amount_cents   INTEGER NOT NULL DEFAULT 0,
+    method         TEXT NOT NULL DEFAULT 'manual',
+    reference      TEXT,
+    months         INTEGER NOT NULL DEFAULT 1,
+    recorded_by    TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+  );
   CREATE TABLE IF NOT EXISTS fare_disputes (
     id         TEXT PRIMARY KEY,
     trip_id    TEXT NOT NULL,

@@ -2,7 +2,6 @@ const crypto = require('crypto');
 const config = require('../config');
 const repo = require('../db/repository');
 const pricing = require('./pricing');
-const { platformFeePercent } = require('./trips');
 
 // Yoco Checkout API — hosted, PCI-compliant card payments in ZAR.
 //   createCheckout(): POST /checkouts → returns redirectUrl to Yoco's page
@@ -199,15 +198,16 @@ async function refundTripForDriver(driverId, tripId) {
 }
 
 // Finalise a successful local payment (webhook or confirmed via API).
+// Monetisation is via driver subscriptions, not a per-ride cut, so the driver
+// keeps the full fare — platformFeeCents is always 0 (kept for the ledger shape).
 function markPaid(tripId, pay, checkout) {
   const amount = (checkout && checkout.amount != null ? checkout.amount : pay.amountCents) / 100;
   const payout = pricing.round(amount);
-  const feePercent = platformFeePercent();
-  const platformFeeCents = Math.round(pay.amountCents * (feePercent / 100));
+  const payoutCents = pricing.dollarsToCents(payout);
   return repo.markPaymentSucceeded(tripId, {
     paymentIntentId: (checkout && checkout.id) || pay.paymentIntentId,
-    driverPayoutCents: pricing.dollarsToCents(payout) - platformFeeCents,
-    platformFeeCents,
+    driverPayoutCents: payoutCents,
+    platformFeeCents: 0,
   });
 }
 

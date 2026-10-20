@@ -5,6 +5,7 @@ import Trips from '../screens/driver/Trips.jsx';
 import Admin from '../screens/driver/Admin.jsx';
 import Analytics from '../screens/driver/Analytics.jsx';
 import Revenue from '../screens/driver/Revenue.jsx';
+import Subscription from '../screens/driver/Subscription.jsx';
 import ThemeToggle from '../components/ThemeToggle.jsx';
 import ErrorBoundary from '../components/ErrorBoundary.jsx';
 import Icon from '../components/Icon.jsx';
@@ -37,6 +38,9 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
       </button>
       <button className={view === 'revenue' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('revenue')} aria-current={view === 'revenue' ? 'page' : undefined}>
         <Icon name="coins" className="nav-icon" /> {t('nav.payouts')}
+      </button>
+      <button className={view === 'subscription' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('subscription')} aria-current={view === 'subscription' ? 'page' : undefined}>
+        <Icon name="receipt" className="nav-icon" /> {t('nav.subscription')}
       </button>
       {hasAdmin && (
         <button className={view === 'admin' ? 'nav-btn active' : 'nav-btn'} onClick={() => setView('admin')} aria-current={view === 'admin' ? 'page' : undefined}>
@@ -94,6 +98,10 @@ export default function DriverShell({ user, setUser, onLogout, onSwitchRole }) {
 
       <div style={{ display: view === 'revenue' ? undefined : 'none' }}>
         <ErrorBoundary resetKey="revenue"><Revenue /></ErrorBoundary>
+      </div>
+
+      <div style={{ display: view === 'subscription' ? undefined : 'none' }}>
+        <ErrorBoundary resetKey="subscription"><Subscription /></ErrorBoundary>
       </div>
 
       <div style={{ display: view === 'profile' ? undefined : 'none' }}>

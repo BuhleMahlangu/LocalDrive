@@ -74,6 +74,11 @@ function seedDriverDocs(userId) {
     proofOfResidencePath: `${userId}_proof.jpg`,
   });
 }
+// Fixture drivers need an active subscription (freemium) so the gate — which is
+// covered on its own in subscription.test.js — doesn't block the flow under test.
+function grantSubscription(userId) {
+  repo.recordSubscriptionPayment(userId, { amountCents: 29900, months: 1, method: 'manual' });
+}
 function seedCustomerIdentity(userId) {
   repo.saveCustomerIdentity(userId, {
     idNumber: TEST_SA_ID,
@@ -112,6 +117,9 @@ function ensureDriver() {
     driver = repo.createUser({ phone: DRIVER_PHONE, name: 'Thabo', email: 'd@x.za', role: 'driver' });
   }
   seedDriverDocs(driver.id);
+  // Give the driver an active subscription so the freemium gate (tested
+  // separately in subscription.test.js) doesn't block these lifecycle tests.
+  grantSubscription(driver.id);
   return { token: signToken({ id: driver.id, role: 'driver' }), user: driver };
 }
 
@@ -368,6 +376,7 @@ test('multi-driver dispatch: every online driver gets the request, first claim w
     driverB = repo.createUser({ phone: '+27826661111', name: 'Sipho', email: 'sip@x.za', role: 'driver' });
   }
   seedDriverDocs(driverB.id);
+  grantSubscription(driverB.id);
   const tokenB = signToken({ id: driverB.id, role: 'driver' });
   const customer = await login('+27730005555', 'customer', 'Zamo', 'zamo@x.za');
 
@@ -464,6 +473,7 @@ test('admin can suspend a driver (blocks driver routes) and unsuspend them', asy
     driver = repo.createUser({ phone: '+27824442222', name: 'Lerato', email: 'ler@x.za', role: 'driver' });
   }
   seedDriverDocs(driver.id);
+  grantSubscription(driver.id);
   const token = signToken({ id: driver.id, role: 'driver' });
 
   // Approved driver reaches operational endpoints.
@@ -599,7 +609,9 @@ test('driver onboarding + admin approval/rejection over HTTP', async () => {
   assert.equal(approve.json.driver.status === 'approved' || approve.json.driver.driverStatus === 'approved', true);
   assert.ok(approve.json.wallet, 'wallet created on approval');
 
-  // Approved driver can now go online.
+  // An approved driver still needs an active subscription to go online.
+  // Grant one, then confirm the freemium gate lets them through.
+  grantSubscription(applicant.user.id);
   const onlineOk = await api('POST', '/api/driver/online', { isOnline: true }, applicant.token);
   assert.equal(onlineOk.status, 200);
   assert.equal(onlineOk.json.isOnline, true);

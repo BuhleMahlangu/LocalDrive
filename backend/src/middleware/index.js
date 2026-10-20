@@ -99,10 +99,14 @@ function errorHandler(err, req, res, _next) {
   logError(err, req);
   const status = err.status || 500;
   if (err.retryAfterSec) res.set('Retry-After', String(err.retryAfterSec));
-  res.status(status).json({
+  const body = {
     error: err.message || 'Internal server error',
     code: err.code,
-  });
+  };
+  // Include subscription state on the freemium gate so the app can show the
+  // renewal details alongside the "renew to take rides" message.
+  if (err.subscription) body.subscription = err.subscription;
+  res.status(status).json(body);
 }
 
 module.exports = { authRequired, optionalAuth, signToken, approvedDriverOnly, adminOnly, notFound, errorHandler, parseCookieHeader, extractToken };

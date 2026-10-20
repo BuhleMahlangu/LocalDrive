@@ -82,6 +82,12 @@ const ICONS = {
       <path d="M12 12v-2M6.5 6.5l1 1M14 14l1.5 1.5" />
     </>
   ),
+  receipt: (
+    <>
+      <path d="M6 3h12v18l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 21Z" />
+      <path d="M9 8h6M9 12h6" />
+    </>
+  ),
 };
 
 export default function Icon({ name, size = 20, className = '', strokeWidth = 1.8 }) {

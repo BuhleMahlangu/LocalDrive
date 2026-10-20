@@ -449,6 +449,7 @@ module.exports = {
           availableCents: row.available_cents || 0,
           owedCents: row.owed_cents || 0,
         },
+        subscription: this.getSubscription(row.id),
       };
     });
   },
@@ -477,6 +478,112 @@ module.exports = {
     return row
       ? { availableCents: row.available_cents, owedCents: row.owed_cents, updatedAt: row.updated_at }
       : { availableCents: 0, owedCents: 0, updatedAt: null };
+  },
+
+  // ---------- Driver subscriptions (freemium) ----------
+  // The owner (role 'admin', i.e. config.driverPhone) is free forever — they
+  // ARE the platform. Everyone else needs an active paid period to take rides.
+  ensureSubscription(driverId) {
+    db.prepare('INSERT OR IGNORE INTO driver_subscriptions (driver_id) VALUES (?)').run(driverId);
+    const user = this.getUserById(driverId);
+    if (user && user.role === 'admin') {
+      db.prepare(
+        "UPDATE driver_subscriptions SET plan = 'free', status = 'active', updated_at = datetime('now') WHERE driver_id = ?",
+      ).run(driverId);
+    }
+    return this.getSubscription(driverId);
+  },
+
+  getSubscription(driverId) {
+    const row = db.prepare('SELECT * FROM driver_subscriptions WHERE driver_id = ?').get(driverId);
+    if (!row) {
+      const user = this.getUserById(driverId);
+      const free = user && user.role === 'admin';
+      return {
+        driverId,
+        plan: free ? 'free' : 'unpaid',
+        status: free ? 'active' : 'unpaid',
+        priceCents: 0,
+        periodStart: null,
+        periodEnd: null,
+        lastPaymentRef: null,
+        active: !!free,
+        updatedAt: null,
+      };
+    }
+    // A paid period is active only while period_end is in the future.
+    const notExpired = row.period_end ? new Date(row.period_end).getTime() > Date.now() : false;
+    const active = row.status === 'active' && (row.plan === 'free' || notExpired);
+    return {
+      driverId: row.driver_id,
+      plan: row.plan,
+      status: row.status,
+      priceCents: row.price_cents,
+      periodStart: row.period_start,
+      periodEnd: row.period_end,
+      lastPaymentRef: row.last_payment_ref,
+      lastPaymentAt: row.updated_at,
+      active,
+      updatedAt: row.updated_at,
+    };
+  },
+
+  // Record a subscription payment and extend the paid period. `months` is the
+  // billing period; the new end stacks onto an unexpired period so early
+  // renewals don't lose the remaining days.
+  recordSubscriptionPayment(driverId, { amountCents, months = 1, method = 'manual', reference, recordedBy } = {}) {
+    this.ensureSubscription(driverId);
+    const id = uid('subpay');
+    const current = this.getSubscription(driverId);
+    const base = current.periodEnd && new Date(current.periodEnd).getTime() > Date.now()
+      ? new Date(current.periodEnd)
+      : new Date();
+    const end = new Date(base);
+    end.setMonth(end.getMonth() + Math.max(1, months));
+    const start = current.periodStart || new Date().toISOString();
+
+    db.prepare(
+      `UPDATE driver_subscriptions
+       SET plan = 'active', status = 'active', price_cents = ?, period_start = ?, period_end = ?,
+           last_payment_ref = ?, updated_at = datetime('now')
+       WHERE driver_id = ?`,
+    ).run(amountCents ?? current.priceCents ?? 0, start, end.toISOString(), reference || null, driverId);
+
+    db.prepare(
+      `INSERT INTO subscription_payments (id, driver_id, amount_cents, method, reference, months, recorded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, driverId, amountCents ?? 0, method, reference || null, Math.max(1, months), recordedBy || null);
+    return this.getSubscription(driverId);
+  },
+
+  setSubscriptionStatus(driverId, status) {
+    this.ensureSubscription(driverId);
+    db.prepare("UPDATE driver_subscriptions SET status = ?, updated_at = datetime('now') WHERE driver_id = ?")
+      .run(status, driverId);
+    return this.getSubscription(driverId);
+  },
+
+  setSubscriptionPlan(driverId, { plan, priceCents }) {
+    this.ensureSubscription(driverId);
+    db.prepare(
+      "UPDATE driver_subscriptions SET plan = ?, price_cents = ?, status = 'active', period_end = NULL, updated_at = datetime('now') WHERE driver_id = ?",
+    ).run(plan, priceCents ?? 0, driverId);
+    return this.getSubscription(driverId);
+  },
+
+  listSubscriptionPayments(driverId) {
+    return db.prepare(
+      'SELECT * FROM subscription_payments WHERE driver_id = ? ORDER BY created_at DESC LIMIT 100',
+    ).all(driverId).map((r) => ({
+      id: r.id,
+      driverId: r.driver_id,
+      amountCents: r.amount_cents,
+      method: r.method,
+      reference: r.reference,
+      months: r.months,
+      recordedBy: r.recorded_by,
+      createdAt: r.created_at,
+    }));
   },
 
   // ---------- Driver bank accounts / payouts ----------
