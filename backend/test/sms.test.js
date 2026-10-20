@@ -64,6 +64,40 @@ test('send() throws with the provider message on a failed send', async () => {
   );
 });
 
+test('WhatsApp sends an Authentication template when one is configured', async () => {
+  const prevEnv = process.env.NODE_ENV;
+  const prevForce = process.env.SMS_FORCE;
+  const prevProvider = process.env.SMS_PROVIDER;
+  const prevTemplate = process.env.WHATSAPP_OTP_TEMPLATE;
+  process.env.NODE_ENV = 'test';
+  process.env.SMS_FORCE = 'true';
+  process.env.SMS_PROVIDER = 'whatsapp';
+  process.env.WHATSAPP_ACCESS_TOKEN = 'WA_TOKEN';
+  process.env.WHATSAPP_PHONE_NUMBER_ID = '1234567890';
+  process.env.WHATSAPP_OTP_TEMPLATE = 'drivelocal_otp';
+  for (const m of ['../src/config', '../src/services/sms']) delete require.cache[require.resolve(m)];
+  try {
+    const wa = require('../src/services/sms');
+    assert.equal(wa.deliversReal(), true);
+    mockFetch(() => jsonResponse(200, { messages: [{ id: 'wamid.TEST' }] }));
+    const result = await wa.send({ to: '+27831234567', body: 'DriveLocal: your verification code is 654321. Valid for 10 minutes.' });
+    assert.equal(result.provider, 'whatsapp');
+    const req = calls[0];
+    assert.match(req.url, /graph\.facebook\.com\/v21\.0\/1234567890\/messages$/);
+    assert.equal(req.opts.headers.Authorization, 'Bearer WA_TOKEN');
+    const payload = JSON.parse(req.opts.body);
+    assert.equal(payload.type, 'template');
+    assert.equal(payload.template.name, 'drivelocal_otp');
+    assert.equal(payload.template.components[0].parameters[0].text, '654321');
+  } finally {
+    process.env.NODE_ENV = prevEnv;
+    if (prevForce === undefined) delete process.env.SMS_FORCE; else process.env.SMS_FORCE = prevForce;
+    if (prevProvider === undefined) delete process.env.SMS_PROVIDER; else process.env.SMS_PROVIDER = prevProvider;
+    if (prevTemplate === undefined) delete process.env.WHATSAPP_OTP_TEMPLATE; else process.env.WHATSAPP_OTP_TEMPLATE = prevTemplate;
+    for (const m of ['../src/config', '../src/services/sms']) delete require.cache[require.resolve(m)];
+  }
+});
+
 test('in development, a configured provider still logs instead of sending (no credit burn)', async () => {
   // Reload config + sms as if NODE_ENV=development without the opt-in flag.
   const prevEnv = process.env.NODE_ENV;

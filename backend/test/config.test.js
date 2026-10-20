@@ -12,6 +12,8 @@ const BASE = {
   JWT_SECRET: 'x'.repeat(48),
   DRIVER_PHONE: '+27830000000',
   SMS_PROVIDER: '',
+  WHATSAPP_ACCESS_TOKEN: '',
+  WHATSAPP_PHONE_NUMBER_ID: '',
   AT_API_KEY: '',
   AT_USERNAME: '',
   TWILIO_ACCOUNT_SID: '',
@@ -67,6 +69,7 @@ test('ALLOW_FIXED_OTP=true lets a closed beta run the fixed code', () => {
 
 test('production starts once a provider is fully configured', () => {
   const cases = [
+    { SMS_PROVIDER: 'whatsapp', WHATSAPP_ACCESS_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' },
     { SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+27000000001' },
     { SMS_PROVIDER: 'africastalking', AT_API_KEY: 'k', AT_USERNAME: 'app' },
     { SMS_PROVIDER: 'clicksend', CLICKSEND_USERNAME: 'u', CLICKSEND_API_KEY: 'k' },

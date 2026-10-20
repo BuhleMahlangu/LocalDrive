@@ -54,6 +54,11 @@ const config = {
     // Force real sending in dev/test (used by the E2E smoke run to assert the
     // exact HTTP request per provider). Without it dev/test log only.
     force: process.env.SMS_FORCE === 'true',
+    // WhatsApp Cloud API (Meta) — preferred for SA: free tier, cheapest OTPs.
+    whatsappToken: process.env.WHATSAPP_ACCESS_TOKEN,
+    whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+    whatsappOtpTemplate: process.env.WHATSAPP_OTP_TEMPLATE,
+    whatsappTemplateLang: process.env.WHATSAPP_TEMPLATE_LANG || 'en',
     atApiKey: process.env.AT_API_KEY,
     atUsername: process.env.AT_USERNAME,
     atSenderId: process.env.AT_SENDER_ID,
@@ -81,6 +86,7 @@ function otpEmailReady() {
 
 function otpSmsReady() {
   switch (process.env.SMS_PROVIDER) {
+    case 'whatsapp': return !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
     case 'africastalking': return !!(process.env.AT_API_KEY && process.env.AT_USERNAME);
     case 'twilio': return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
     case 'clicksend': return !!(process.env.CLICKSEND_USERNAME && process.env.CLICKSEND_API_KEY);

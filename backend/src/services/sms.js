@@ -6,11 +6,13 @@
 // fixed code 123456 (development only — see services/auth.js + config).
 //
 // Supported providers (SMS_PROVIDER):
+//   - whatsapp        WhatsApp Cloud API (Meta) — free tier / cheapest OTPs
+//                     WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, optional WHATSAPP_OTP_TEMPLATE
 //   - africastalking  Africa's Talking (SA + rest of Africa) — AT_API_KEY, AT_USERNAME, optional AT_SENDER_ID
 //   - twilio          Twilio           — TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
 //   - clicksend       ClickSend        — CLICKSEND_USERNAME, CLICKSEND_API_KEY, optional CLICKSEND_FROM
 //
-// All three are plain HTTP APIs, so we use the built-in fetch (Node >= 18).
+// All are plain HTTP APIs, so we use the built-in fetch (Node >= 18).
 // Callers only rely on `send()` throwing on failure, so adding a provider is
 // contained to this file.
 
@@ -20,6 +22,7 @@ function isConfigured() {
   const s = config.sms;
   if (!s || !s.provider) return false;
   switch (s.provider) {
+    case 'whatsapp': return !!(s.whatsappToken && s.whatsappPhoneNumberId);
     case 'africastalking': return !!(s.atApiKey && s.atUsername);
     case 'twilio': return !!(s.twilioAccountSid && s.twilioAuthToken && s.twilioFrom);
     case 'clicksend': return !!(s.clicksendUser && s.clicksendApiKey);
@@ -47,6 +50,38 @@ function providerName() {
 // Providers expect bare E.164 without dashes/spaces.
 function normalize(to) {
   return String(to || '').replace(/[^\d+]/g, '');
+}
+
+async function sendWhatsApp({ to, body }, s) {
+  const url = `https://graph.facebook.com/v21.0/${s.whatsappPhoneNumberId}/messages`;
+  // If an approved Authentication template is configured, send it (required
+  // outside the 24h customer-service window). The template body must contain
+  // the code placeholder — we pass the code as the single body parameter.
+  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
+  const payload = s.whatsappOtpTemplate && code
+    ? {
+        messaging_product: 'whatsapp',
+        to: normalize(to),
+        type: 'template',
+        template: {
+          name: s.whatsappOtpTemplate,
+          language: { code: s.whatsappTemplateLang || 'en' },
+          components: [{ type: 'body', parameters: [{ type: 'text', text: code }] }],
+        },
+      }
+    : { messaging_product: 'whatsapp', to: normalize(to), type: 'text', text: { preview_url: false, body } };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${s.whatsappToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = data?.error?.message || 'send failed';
+    throw new Error(`WhatsApp error ${res.status}: ${msg}`);
+  }
+  return { queued: true, provider: 'whatsapp', messageId: data?.messages?.[0]?.id };
 }
 
 async function sendAfricasTalking({ to, body }, s) {
@@ -123,6 +158,7 @@ async function send({ to, body }) {
   const s = config.sms;
   if (isConfigured() && !consoleOnly()) {
     switch (s.provider) {
+      case 'whatsapp': return sendWhatsApp({ to, body }, s);
       case 'africastalking': return sendAfricasTalking({ to, body }, s);
       case 'twilio': return sendTwilio({ to, body }, s);
       case 'clicksend': return sendClicksend({ to, body }, s);
