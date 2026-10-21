@@ -33,4 +33,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
   CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # Seed the owner-driver on every start (idempotent), then run the API.
-CMD ["sh", "-c", "node src/scripts/seed.js && node src/server.js"]
+# The backup loop runs alongside it so the SQLite file on the volume is
+# snapshotted every BACKUP_INTERVAL_HOURS — a platform disk is the only copy
+# of the data, so set BACKUP_S3_* to keep an off-site copy too.
+CMD ["sh", "-c", "node src/scripts/seed.js && (node src/scripts/backup-loop.js &) && exec node src/server.js"]
