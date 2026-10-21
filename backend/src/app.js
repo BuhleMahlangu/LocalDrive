@@ -22,6 +22,9 @@ const { attachRequestLogger } = require('./services/logger');
 // ({ tripUpdated, newTripToDriver, ... }); tests pass a no-op stub.
 function createApp({ notify }) {
   const app = express();
+  // Behind a proxy (Railway/Render/Caddy/nginx) req.ip would otherwise be the
+  // proxy's address, so every user would share one rate-limit bucket.
+  app.set('trust proxy', config.trustProxy);
   app.use(cors({ origin: config.corsOrigins, credentials: true }));
   // Lightweight security headers (no extra dependency). Keep these conservative:
   // they never inspect bodies or alter routing, so they can't break endpoints.

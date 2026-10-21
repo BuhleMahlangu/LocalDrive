@@ -1,11 +1,23 @@
 $schema = "https://railway.com/railway.schema.json"
 
+# Railway service = the API only (Express + Socket.io). The React PWA is
+# deployed separately (Vercel — see app/vercel.json), so the image is built
+# from Dockerfile.backend, which has no frontend build stage.
+#
+# Before the first deploy, attach a Volume to this service mounted at /data
+# (Dashboard -> service -> Volumes -> Add Volume). SQLite and the uploaded
+# identity documents live there, so they survive redeploys. The image already
+# points DB_FILE/UPLOADS_DIR at /data.
+#
+# For the one-host model (SPA served by this same service) switch
+# dockerfilePath back to "./Dockerfile".
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile"
+dockerfilePath = "Dockerfile.backend"
 
 [deploy]
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+numReplicas = 1

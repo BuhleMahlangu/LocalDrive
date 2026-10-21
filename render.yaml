@@ -1,0 +1,79 @@
+# DriveLocal — split deployment on Render.
+#
+#   render blueprint launch   (or "New -> Blueprint" in the dashboard)
+#
+# Two services:
+#   drivelocal-api  the Express + Socket.io backend (Docker, SQLite on a disk)
+#   drivelocal-web  the React PWA as a static site
+#
+# After the first deploy, set the values marked `sync: false` in the dashboard
+# (Render prompts for them), then redeploy so the frontend picks up the API URL:
+#   - drivelocal-api: DRIVER_PHONE, CORS_ORIGINS (the web service's URL)
+#   - drivelocal-web: VITE_API_BASE (the API service's URL)
+#
+# The frontend's VITE_API_BASE is baked in at BUILD time, so it must be set
+# before the web service builds. Change it in the dashboard and trigger a
+# redeploy.
+
+services:
+  # ---------------------------------------------------------------- API ------
+  - type: web
+    name: drivelocal-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    dockerContext: .
+    healthCheckPath: /health
+    # The API must not be scaled to zero: WebSockets and in-flight trips need
+    # a warm process.
+    numInstances: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # PORT is not set here on purpose: Render injects it and routes to it.
+      - key: DB_FILE
+        value: /data/drivelocal.sqlite
+      - key: UPLOADS_DIR
+        value: /data/uploads
+      - key: TRUST_PROXY
+        value: "1"
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DRIVER_PHONE
+        sync: false
+      # The frontend's origin(s), comma-separated. Must be set for the auth
+      # cookie (SameSite=None) and the API to be usable from the browser.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: SERVICE_AREA_NAME
+        sync: false
+      - key: SERVICE_AREA_LAT
+        sync: false
+      - key: SERVICE_AREA_LNG
+        sync: false
+      - key: SERVICE_AREA_RADIUS_KM
+        value: "30"
+    disk:
+      name: drivelocal-data
+      mountPath: /data
+      sizeGB: 1
+
+  # --------------------------------------------------------------- WEB ------
+  - type: web
+    name: drivelocal-web
+    runtime: static
+    buildCommand: cd app && npm ci && npm run build
+    staticPublishPath: ./app/dist
+    envVars:
+      # The API origin, e.g. https://drivelocal-api.onrender.com
+      - key: VITE_API_BASE
+        sync: false
+      # The owner-driver's phone, so the app can show the support/WhatsApp
+      # contact and recognise the admin account.
+      - key: VITE_DRIVER_PHONE
+        sync: false
+    # Single-page app: every unknown path (e.g. the shared /trip/:id link)
+    # must serve index.html. Real files (assets, sw.js) are served first.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

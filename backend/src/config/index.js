@@ -3,6 +3,20 @@ require('dotenv').config();
 const nodeEnv = process.env.NODE_ENV || 'development';
 const jwtSecret = process.env.JWT_SECRET || 'dev-secret-change-me';
 
+// Parse TRUST_PROXY into an Express "trust proxy" value:
+//   unset        -> 1 in production (one proxy hop), off in dev/test
+//   false | 0    -> trust nothing (the app is exposed directly)
+//   true         -> trust every hop (only safe if the header can't be spoofed)
+//   <n>          -> trust that many hops
+function parseTrustProxy(value) {
+  if (value === undefined || value === '') return nodeEnv === 'production' ? 1 : false;
+  const v = String(value).trim().toLowerCase();
+  if (v === 'false' || v === '0' || v === 'no' || v === 'off') return false;
+  if (v === 'true' || v === 'yes' || v === 'on') return true;
+  const hops = Number(v);
+  return Number.isFinite(hops) ? hops : (nodeEnv === 'production' ? 1 : false);
+}
+
 const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   nodeEnv,
@@ -86,6 +100,13 @@ const config = {
   osrmBaseUrl: process.env.OSRM_BASE_URL || 'https://router.project-osrm.org',
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:5174,http://localhost:5175')
     .split(',').map((s) => s.trim()).filter(Boolean),
+  // How many proxy hops to trust when reading the client IP. Every real
+  // deployment sits behind one (Railway, Render, Caddy, nginx), and without
+  // this req.ip is the proxy's address — which would make the per-IP PIN
+  // throttle apply to every user at once. 1 = trust the first hop only.
+  // Set TRUST_PROXY=false (or 0) to disable (e.g. when the app is exposed
+  // directly, where a client could otherwise spoof its own IP).
+  trustProxy: parseTrustProxy(process.env.TRUST_PROXY),
 };
 
 // Fail fast in production: never run with a known default secret or without the

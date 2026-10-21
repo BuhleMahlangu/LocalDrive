@@ -12,7 +12,11 @@ const tripService = require('../services/trips');
 
 function initSocket(httpServer, corsOrigins) {
   const io = new Server(httpServer, {
-    cors: { origin: corsOrigins, methods: ['GET', 'POST'] },
+    // credentials:true is required for the auth cookie to cross origins. The
+    // session token lives in an HttpOnly cookie (never in JS storage), so on a
+    // split deploy (app on Vercel, API on Railway/Render) the browser refuses
+    // to send it unless the CORS response allows credentials.
+    cors: { origin: corsOrigins, methods: ['GET', 'POST'], credentials: true },
   });
 
   // Auto-offline grace timers per driver: a disconnect doesn't instantly mark

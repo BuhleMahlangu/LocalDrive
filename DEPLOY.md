@@ -2,9 +2,10 @@
 
 This guide takes the app live for a small single-driver service: a VPS (or always-on home server) running the Node backend, a static build of the React app, and **Caddy** providing HTTPS + reverse proxy (handles the Socket.io WebSockets automatically).
 
-The path below is the recommended **one-host** setup (frontend + API + WebSockets on one HTTPS domain). A lighter **two-host** alternative (static SPA + API) is covered at the end.
+The path below is the recommended **one-host** setup (frontend + API + WebSockets on one HTTPS domain). A **split** setup (static SPA on Vercel + API on Railway/Render, SQLite on a volume) is covered in **[§12](#12-split-deployment-vercel--railway--render)**.
 
 > Prefer containers? Jump to **[§14 Docker](#14-docker-alternative-optional)** — a multi-stage `Dockerfile` + `docker-compose.yml` (with optional Caddy) are included at the repo root.
+> Prefer managed hosting? Jump to **[§12 Split deployment](#12-split-deployment-vercel--railway--render)** — `Dockerfile.backend`, `railway.toml` and `render.yaml` are ready to deploy.
 
 ## 1. What you need
 
@@ -175,16 +176,154 @@ Run through this on the live URL before telling anyone:
 - [ ] **Backup** — schedule `npm run backup` nightly and copy the snapshots off the server.
 - [ ] **Pickup spots set up** — add the preset pickup spots via the owner app's **Admin → Spots** tab (tap "Add spot", then the map; each shows as a pin to every customer and driver).
 
-## 12. Two-host alternative (static SPA + separate API)
+## 12. Split deployment (Vercel + Railway / Render)
 
-This avoids the backend serving static files: host `app/dist/` on Vercel/Netlify/Cloudflare Pages and the API on a Node host.
+The one-host model above (backend serves the API *and* the built SPA behind Caddy) is
+the simplest thing to run. This section covers the **split** model instead: the React
+PWA is a static site on **Vercel**, the API + WebSockets run on **Railway** or
+**Render**, and **SQLite lives on a persistent volume** so data survives redeploys.
 
-1. Build the frontend with the API origin set: `VITE_API_BASE=https://api.your-domain.com npm run build` (leave it unset for one-host).
-2. Upload `app/dist/*` to the static host. Enable an **SPA fallback**: every route that isn't a real file must return `index.html` (required for the `/trip/:id` public tracker links).
-3. Run the backend on its own host behind Caddy/nginx with the same reverse-proxy rules (proxy `/api` and `/socket.io`, allow WebSocket upgrades for live tracking).
+```
+   phone/browser
+        |  https
+        v
+  +-------------+          https (CORS, cookie, WebSocket)
+  |   Vercel    |  ---------------------------->  +------------------+
+  |  static SPA |                                 |  Railway / Render|
+  |  app/       | <----------------------------  |  Express+Socket  |
+  +-------------+   auth cookie (SameSite=None)    |  /data (volume)  |
+        |                                             +------------------+
+        |  PWA install, geolocation, push                 SQLite + uploads
+```
+
+### 12.1 What is in the repo
+
+| File | Purpose |
+|------|---------|
+| `app/vercel.json` | Vercel project config: build command, output dir, SPA rewrite for `/trip/:id` links |
+| `app/.env.example` | The frontend's build-time variables (`VITE_API_BASE`, `VITE_DRIVER_PHONE`) |
+| `Dockerfile.backend` | Backend-only image (no frontend build stage) — used by Railway and Render |
+| `railway.toml` | Railway build/deploy config (points at `Dockerfile.backend`) |
+| `render.yaml` | Render blueprint: an API service (with a disk) + a static site |
+
+The root `Dockerfile` is **unchanged** and still builds the one-host image (SPA inside
+the backend container) — use it for the model in §1–§14, and `Dockerfile.backend` for
+the split model.
+
+### 12.2 Backend on Railway
+
+1. **New project → Deploy from GitHub repo** (this repo). Railway picks up
+   `railway.toml` and builds `Dockerfile.backend`.
+2. **Attach a volume**: service → *Volumes* → *Add Volume*, mount path **`/data`**.
+   The image already points `DB_FILE=/data/drivelocal.sqlite` and
+   `UPLOADS_DIR=/data/uploads` there, so the database and the uploaded identity
+   documents survive every redeploy. **Skip this and you lose everything on the
+   next deploy.**
+3. **Variables** (service → Variables):
+
+   | Variable | Value |
+   |----------|-------|
+   | `NODE_ENV` | `production` |
+   | `JWT_SECRET` | a long random string (32+ chars) — *Generate* in the dashboard |
+   | `DRIVER_PHONE` | your phone in E.164, e.g. `+27721234567` |
+   | `SERVICE_AREA_NAME` / `_LAT` / `_LNG` | the town you serve (or set it later in Admin → Settings) |
+   | `CORS_ORIGINS` | the **Vercel URL**, e.g. `https://drivelocal.vercel.app` (comma-separated for more) |
+   | `TRUST_PROXY` | `1` (the default in production — see §12.6) |
+   | `YOCO_SECRET_KEY`, `YOCO_WEBHOOK_SECRET` | optional, for card payments |
+   | `SMS_PROVIDER` + keys, `SMTP_*` | optional (SOS alerts, email notifications) |
+
+4. Deploy. Railway gives you `https://<service>.up.railway.app` and provisions
+   HTTPS for it. The health check is `/health` (already configured in `railway.toml`).
+
+### 12.3 Backend on Render
+
+`render.yaml` is a **Blueprint**: dashboard → *New → Blueprint* → pick this repo.
+
+1. Render creates two services and asks for the values marked `sync: false`:
+   `DRIVER_PHONE`, `CORS_ORIGINS` (the web service's URL), `SERVICE_AREA_*`,
+   and `VITE_API_BASE` + `VITE_DRIVER_PHONE` for the frontend.
+2. The API service gets a **1 GB disk mounted at `/data`** automatically — that is
+   where the SQLite file and uploads live.
+3. The web service builds `app/` (`cd app && npm ci && npm run build`) and serves
+   `app/dist` as a static site, with the SPA rewrite for `/trip/:id` links.
+
+Render static sites get their own `*.onrender.com` URL and HTTPS. Set
+`CORS_ORIGINS` on the API to that URL, and `VITE_API_BASE` on the web service to
+the API's URL.
+
+### 12.4 Frontend on Vercel
+
+1. Dashboard → *Add New → Project* → import this repo.
+2. **Root Directory: `app`** (important — the frontend is a subfolder).
+   Framework preset: *Vite*. `app/vercel.json` supplies the build command
+   (`npm run build`), the output directory (`dist`) and the SPA rewrite.
+3. **Environment Variables** (Production, Preview and Development):
+
+   | Variable | Value |
+   |----------|-------|
+   | `VITE_API_BASE` | the API origin, e.g. `https://drivelocal-api.up.railway.app` |
+   | `VITE_DRIVER_PHONE` | the same owner phone as `DRIVER_PHONE` on the API (used for the support/WhatsApp contact and to recognise the admin account) |
+
+4. Deploy. Vercel serves the PWA over HTTPS.
+
+> **`VITE_API_BASE` is baked in at build time.** Changing it in the dashboard
+> requires a **redeploy** (Vercel: *Deployments → ⋯ → Redeploy*) — it is not a
+> runtime variable.
+
+### 12.5 How the two halves talk to each other
+
+- **The session cookie.** The auth token is an `HttpOnly` cookie, and the API sets
+  it with `SameSite=None; Secure` in production so the browser will send it from
+  the Vercel origin to the API origin. That requires **HTTPS on both sides**
+  (Vercel and Railway/Render both provide it) — it will not work over plain HTTP
+  on a different domain.
+- **CORS.** `CORS_ORIGINS` must list the exact frontend origin (scheme + host,
+  no trailing slash, no path). Requests carry credentials, so the API answers
+  with the specific origin (never `*`) plus `Access-Control-Allow-Credentials`.
+- **WebSockets.** The live trip tracker and driver location updates use
+  Socket.io, which is CORS-checked the same way — the API enables credentials for
+  it, so the cookie authenticates the socket handshake.
+- **The service worker** only caches same-origin app assets; API calls are never
+  cached by it, so the split does not affect offline behaviour.
+
+### 12.6 `TRUST_PROXY` (why it matters here)
+
+Railway and Render terminate TLS at a proxy, so every request reaches the
+container from the *same* address. Without `trust proxy` the per-IP PIN throttle
+(20 failures/minute) would count **all users together** — one burst of failed
+logins anywhere would lock everyone out. With `TRUST_PROXY=1` (the default in
+production) the API reads the real client IP from `X-Forwarded-For`.
+
+Set `TRUST_PROXY=false` only if the API is exposed directly with no proxy in
+front of it (in that case a client could spoof its own IP).
+
+### 12.7 Before you go live
+
+- [ ] `CORS_ORIGINS` on the API matches the frontend URL exactly (https, no trailing slash).
+- [ ] `VITE_API_BASE` on the frontend points at the API URL, and the frontend was **rebuilt** after setting it.
+- [ ] The volume/disk is attached at `/data` — check that `DB_FILE` and `UPLOADS_DIR` point inside it.
+- [ ] Sign in on a phone (not a laptop) and confirm the session survives a page reload.
+- [ ] Book a ride and watch the driver's live location update (the WebSocket path — a broken socket usually shows as "no live updates" rather than an error).
+- [ ] Redeploy the backend and confirm the accounts, trips and uploaded documents are still there.
+
+### 12.8 Two-host alternative (self-managed)
+
+The same split works with any static host (Netlify, Cloudflare Pages, nginx) and
+any Node host, without Railway/Render:
+
+1. Build the frontend with the API origin set:
+   `VITE_API_BASE=https://api.your-domain.com npm run build` (leave it unset for
+   the one-host model).
+2. Upload `app/dist/*` to the static host. Enable an **SPA fallback**: every route
+   that isn't a real file must return `index.html` (required for the `/trip/:id`
+   public tracker links).
+3. Run the backend on its own host behind Caddy/nginx with the same reverse-proxy
+   rules (proxy `/api` and `/socket.io`, allow WebSocket upgrades for live
+   tracking), and set `TRUST_PROXY=1`.
 4. Set `CORS_ORIGINS=https://your-domain.com` in the backend `.env`.
 
-Geolocation, push, payments and PWA install all require **HTTPS** on the domain your phone opens.
+Geolocation, push, payments and PWA install all require **HTTPS** on the domain
+your phone opens.
 
 ## 13. Notes & gotchas
 
@@ -224,6 +363,7 @@ the one-host model: the backend serves both the API and the built SPA.
 
 Files:
 - `Dockerfile` — multi-stage: builds the PWA, then runs the Node backend with `app/dist` baked in.
+- `Dockerfile.backend` — backend-only image (no frontend build stage), for the split model in §12.
 - `docker-compose.yml` — `app` (backend) service + an **optional** `caddy` proxy service (HTTPS).
 - `Caddyfile` — reverse-proxies everything to the app container (WebSockets included).
 

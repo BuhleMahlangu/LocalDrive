@@ -1,0 +1,36 @@
+# ---- Backend-only image (split deployment) ---------------------------------
+# Same runtime as the root Dockerfile, minus the React build stage. Use this
+# when the SPA is hosted separately (Vercel) and only the API + WebSockets run
+# here (Railway / Render). The one-host model still uses the root `Dockerfile`.
+#
+#   railway.toml  -> dockerfilePath = "./Dockerfile.backend"
+#   render.yaml   -> dockerfilePath: ./Dockerfile.backend
+FROM node:20-bookworm-slim
+WORKDIR /app
+
+COPY backend/package.json backend/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY backend/ .
+
+ENV NODE_ENV=production
+ENV PORT=4000
+# SQLite database + uploaded identity documents live on the mounted volume, so
+# they survive a redeploy. Attach a volume at /data (Railway: a "Volume"; Render:
+# a "Disk" mounted at /data).
+ENV DB_FILE=/data/drivelocal.sqlite
+ENV UPLOADS_DIR=/data/uploads
+# The app is always behind a proxy here (Railway/Render terminate TLS), so
+# trust the first hop to get the real client IP for the PIN rate limiter.
+ENV TRUST_PROXY=1
+
+VOLUME ["/data", "/app/backups"]
+
+EXPOSE 4000
+
+# Node 20's built-in fetch is used for the healthcheck (the slim image purges wget/curl).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+  CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Seed the owner-driver on every start (idempotent), then run the API.
+CMD ["sh", "-c", "node src/scripts/seed.js && node src/server.js"]

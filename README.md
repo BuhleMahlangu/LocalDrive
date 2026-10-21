@@ -11,6 +11,28 @@ LocalDrive/
 └── app/       # Single React (Vite) PWA — customer + driver views in one
 ```
 
+## Deploying
+
+Two supported shapes (full instructions in **[DEPLOY.md](DEPLOY.md)**):
+
+- **One host** — the backend serves the API *and* the built SPA behind Caddy
+  (§1–§14). Simplest to run.
+- **Split** — the SPA is a static site on **Vercel**, the API + WebSockets run on
+  **Railway** or **Render** with **SQLite on a persistent volume**
+  ([§12](DEPLOY.md#12-split-deployment-vercel--railway--render)). Ready-to-deploy
+  configs ship in the repo: `app/vercel.json`, `Dockerfile.backend`,
+  `railway.toml`, `render.yaml`.
+
+```bash
+# one host
+docker compose up --build          # backend + SPA + optional Caddy
+
+# split: backend on Railway/Render (DB on the volume at /data)
+docker build -f Dockerfile.backend -t drivelocal-api .
+# split: frontend on Vercel (root directory = app/)
+cd app && VITE_API_BASE=https://<api-host> npm run build
+```
+
 ## Stack
 
 | Layer | Tech |
@@ -106,7 +128,10 @@ Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate 
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
-| `CORS_ORIGINS` | Comma-separated allowed origins (default `http://localhost:5173`) |
+| `CORS_ORIGINS` | Comma-separated allowed origins (default `http://localhost:5173`). On a split deploy this is the frontend's exact origin |
+| `TRUST_PROXY` | Proxy hops to trust for the client IP (default `1` in production). Keeps the per-IP PIN throttle per-user behind a proxy — see [DEPLOY.md §12.6](DEPLOY.md#126-trust_proxy-why-it-matters-here) |
+| `DB_FILE` / `UPLOADS_DIR` | Where SQLite and the uploaded documents live. Point both at the mounted volume (`/data/…`) on Railway/Render so they survive redeploys |
+| `VITE_API_BASE` | *(frontend)* the API origin when the SPA is hosted separately. Baked in at **build** time — changing it needs a rebuild |
 
 PIN attempts are **rate-limited** per phone (5 failures / 60s window) and per IP (20 failures / 60s window); only failures count, so a correct login is never throttled.
 

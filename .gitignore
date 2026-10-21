@@ -3,8 +3,11 @@ node_modules/
 
 # Build output
 app/dist/
+dist/
 
-# Playwright test artifacts
+# Tool caches / test artifacts
+.vite/
+test-results/
 app/test-results/
 app/playwright-report/
 
