@@ -1,24 +1,18 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-// The OTP *request* caps are relaxed outside production (no real SMS is sent
-// there), so the 3-per-minute production limit must be asserted against an
-// explicitly production-configured module. Reloading with a purged cache keeps
-// each environment's buckets and limits isolated. A dummy SMS provider is set
-// because these tests exercise rate limiting, not OTP delivery — production
-// config refuses to start without a real delivery path.
+// PIN login must be throttled identically in every environment — brute-force
+// protection is a security control, not an abuse control, so unlike the old OTP
+// caps it is never relaxed for dev/test. Reloading with a purged cache keeps
+// each environment's buckets and limits isolated.
 function loadRateLimit(nodeEnv) {
   const prev = process.env.NODE_ENV;
-  const prevProvider = process.env.SMS_PROVIDER;
-  const prevUser = process.env.CLICKSEND_USERNAME;
-  const prevKey = process.env.CLICKSEND_API_KEY;
   const prevLat = process.env.SERVICE_AREA_LAT;
   const prevLng = process.env.SERVICE_AREA_LNG;
   process.env.NODE_ENV = nodeEnv;
   if (nodeEnv === 'production') {
-    process.env.SMS_PROVIDER = 'clicksend';
-    process.env.CLICKSEND_USERNAME = 'ratelimit-test';
-    process.env.CLICKSEND_API_KEY = 'ratelimit-test';
+    // Satisfy the remaining production gates (JWT/DRIVER_PHONE/area) so config
+    // loads; rate limiting is what these tests exercise.
     process.env.SERVICE_AREA_LAT = '-26.2155';
     process.env.SERVICE_AREA_LNG = '29.2916';
   }
@@ -27,83 +21,64 @@ function loadRateLimit(nodeEnv) {
   delete require.cache[require.resolve('../src/config')];
   const mod = require('../src/services/rateLimit');
   process.env.NODE_ENV = prev;
-  if (prevProvider === undefined) delete process.env.SMS_PROVIDER; else process.env.SMS_PROVIDER = prevProvider;
-  if (prevUser === undefined) delete process.env.CLICKSEND_USERNAME; else process.env.CLICKSEND_USERNAME = prevUser;
-  if (prevKey === undefined) delete process.env.CLICKSEND_API_KEY; else process.env.CLICKSEND_API_KEY = prevKey;
   if (prevLat === undefined) delete process.env.SERVICE_AREA_LAT; else process.env.SERVICE_AREA_LAT = prevLat;
   if (prevLng === undefined) delete process.env.SERVICE_AREA_LNG; else process.env.SERVICE_AREA_LNG = prevLng;
   return mod;
 }
 
-test('production allows up to 3 requests per phone per 60s window', () => {
-  const { checkOtpLimit } = loadRateLimit('production');
-  for (let i = 0; i < 3; i += 1) {
-    assert.equal(checkOtpLimit('+27820000001').ok, true, `request ${i + 1} should pass`);
-  }
-  const blocked = checkOtpLimit('+27820000001');
-  assert.equal(blocked.ok, false);
-  assert.equal(blocked.code, 'TOO_FREQUENT');
-  assert.ok(blocked.retryAfterSec > 0);
-});
-
-test('production enforces the daily cap', () => {
-  const { limits } = loadRateLimit('production');
-  assert.equal(limits.otpPerDay, 10);
-  assert.equal(limits.otpPerWindow, 3);
-});
-
-test('does not throttle different phones', () => {
-  const { checkOtpLimit } = loadRateLimit('production');
-  assert.equal(checkOtpLimit('+27820000002').ok, true);
-  assert.equal(checkOtpLimit('+27820000003').ok, true);
-});
-
-test('verify attempts stay capped in every environment', () => {
+test('PIN failures are capped per phone per window in every environment', () => {
   for (const env of ['production', 'test']) {
-    const { checkVerifyLimit, limits } = loadRateLimit(env);
-    assert.equal(limits.verifyPerWindow, 5, `${env} verify cap`);
-    const phone = `+2783000${env === 'production' ? '1' : '2'}`;
+    const { checkPinLimit, recordPinFailure, limits } = loadRateLimit(env);
+    assert.equal(limits.pinPerWindow, 5, `${env} pin cap`);
+    const phone = `+2782000${env === 'production' ? '1' : '2'}`;
     for (let i = 0; i < 5; i += 1) {
-      assert.equal(checkVerifyLimit(phone).ok, true, `${env} attempt ${i + 1}`);
+      assert.equal(checkPinLimit(phone).ok, true, `${env} attempt ${i + 1}`);
+      recordPinFailure(phone);
     }
-    assert.equal(checkVerifyLimit(phone).ok, false, `${env} attempt 6 must be blocked`);
+    const blocked = checkPinLimit(phone);
+    assert.equal(blocked.ok, false, `${env} attempt 6 must be blocked`);
+    assert.ok(blocked.retryAfterSec > 0);
   }
 });
 
-test('outside production the request cap is relaxed so e2e logins do not throttle', () => {
-  const { checkOtpLimit, limits } = loadRateLimit('test');
-  assert.ok(limits.otpPerWindow > 3);
-  for (let i = 0; i < 10; i += 1) {
-    assert.equal(checkOtpLimit('+27840000001').ok, true, `dev request ${i + 1}`);
+test('successful logins are not throttled (only failures count)', () => {
+  const { checkPinLimit, recordPinFailure } = loadRateLimit('production');
+  const phone = '+27820000009';
+  for (let i = 0; i < 20; i += 1) {
+    assert.equal(checkPinLimit(phone).ok, true, `attempt ${i + 1}`);
+    // A correct PIN never calls recordPinFailure, so the limit never trips.
   }
+  assert.equal(checkPinLimit(phone).ok, true);
+  // One failure is still well under the cap.
+  recordPinFailure(phone);
+  assert.equal(checkPinLimit(phone).ok, true);
 });
 
-test('production caps OTP requests per IP, with a Retry-After hint', () => {
-  const { checkOtpIpLimit } = loadRateLimit('production');
+test('the phone cap does not throttle different phones', () => {
+  const { checkPinLimit } = loadRateLimit('production');
+  assert.equal(checkPinLimit('+27820000002').ok, true);
+  assert.equal(checkPinLimit('+27820000003').ok, true);
+});
+
+test('PIN failures are capped per IP, with a Retry-After hint', () => {
+  const { checkPinIpLimit, recordPinIpFailure, limits } = loadRateLimit('production');
   const ip = '41.203.10.7';
-  for (let i = 0; i < 12; i += 1) {
-    assert.equal(checkOtpIpLimit(ip).ok, true, `request ${i + 1} from the IP`);
+  for (let i = 0; i < limits.pinPerIp; i += 1) {
+    assert.equal(checkPinIpLimit(ip).ok, true, `attempt ${i + 1} from the IP`);
+    recordPinIpFailure(ip);
   }
-  const blocked = checkOtpIpLimit(ip);
-  assert.equal(blocked.ok, false, 'the 13th request in the window is blocked');
-  assert.equal(blocked.code, 'IP_TOO_FREQUENT');
+  const blocked = checkPinIpLimit(ip);
+  assert.equal(blocked.ok, false, 'the next attempt in the window is blocked');
   assert.ok(blocked.retryAfterSec > 0 && blocked.retryAfterSec <= 60,
     `retryAfterSec must be a sane seconds value, got ${blocked.retryAfterSec}`);
 });
 
 test('the per-IP cap does not leak across IPs, and empty IPs are never throttled', () => {
-  const { checkOtpIpLimit } = loadRateLimit('production');
+  const { checkPinIpLimit, recordPinIpFailure, limits } = loadRateLimit('production');
   const ip = '105.184.0.9';
-  for (let i = 0; i < 13; i += 1) checkOtpIpLimit(ip);
-  assert.equal(checkOtpIpLimit(ip).ok, false, 'the noisy IP is blocked');
-  assert.equal(checkOtpIpLimit('105.184.0.10').ok, true, 'a different IP is unaffected');
-  assert.equal(checkOtpIpLimit('').ok, true, 'no IP (e.g. a broken peer address) never blocks OTP delivery');
-  assert.equal(checkOtpIpLimit(null).ok, true);
-});
-
-test('outside production the per-IP cap is off so dev/e2e logins never throttle', () => {
-  const { checkOtpIpLimit } = loadRateLimit('test');
-  for (let i = 0; i < 50; i += 1) {
-    assert.equal(checkOtpIpLimit('127.0.0.1').ok, true, `dev request ${i + 1}`);
-  }
+  for (let i = 0; i < limits.pinPerIp; i += 1) recordPinIpFailure(ip);
+  assert.equal(checkPinIpLimit(ip).ok, false, 'the noisy IP is blocked');
+  assert.equal(checkPinIpLimit('105.184.0.10').ok, true, 'a different IP is unaffected');
+  assert.equal(checkPinIpLimit('').ok, true, 'no IP (e.g. a broken peer address) never blocks login');
+  assert.equal(checkPinIpLimit(null).ok, true);
 });

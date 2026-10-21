@@ -18,16 +18,6 @@ const repo = require('../src/db/repository');
 const { createApp } = require('../src/app');
 const { signToken } = require('../src/middleware');
 
-// Tests never actually send an SMS: capture the OTP the way a real recipient
-// would, so logins use the same random code the server generated.
-const sms = require('../src/services/sms');
-const sentOtps = new Map();
-sms.send = async ({ to, body }) => {
-  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
-  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
-  return { logged: true };
-};
-
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
   tripAccepted() {}, tripArrived() {}, paymentUpdated() {},
@@ -108,8 +98,7 @@ before(async () => {
   });
   const { port } = server.address();
   BASE = `http://127.0.0.1:${port}`;
-  // Log the customer in once and reuse the token: the OTP request limiter
-  // allows only 3 requests / 60s per phone, and every test books a trip.
+  // Log the customer in once and reuse the token (avoids repeat logins).
   const customer = await login('+27739998888', 'customer', 'Lerato', 'l@x.za');
   // Booking requires an ID copy + selfie on file.
   repo.saveCustomerIdentity(customer.user.id, {
@@ -140,14 +129,16 @@ async function api(method, path, body, token, raw = false) {
   return { status: res.status, json };
 }
 
+function pinFor(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.slice(-6).padStart(6, '0');
+}
 async function login(phone, role, name, email) {
-  await api('POST', '/api/auth/otp/request', { phone, role });
-  const code = sentOtps.get(phone.replace(/[^+\d]/g, ''));
-  assert.ok(code, `otp code captured for ${phone}`);
-  const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code, role, name, email,
-  });
-  assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
+  const pin = pinFor(phone);
+  const setup = await api('POST', '/api/auth/pin/setup', { phone, pin, role, name, email });
+  if (setup.status === 200) return setup.json;
+  const res = await api('POST', '/api/auth/pin/login', { phone, pin, role });
+  assert.equal(res.status, 200, `pin login ok for ${phone} (${role})`);
   return res.json;
 }
 

@@ -3,7 +3,7 @@
 // without eyeballing: contrast, touch targets, tap highlight, focusability,
 // overflow and missing labels on the real rendered DOM.
 import { test, expect } from '@playwright/test';
-import { waitForOtp } from './otp.js';
+import { loginWithPin } from './pin.js';
 
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
 
@@ -240,17 +240,7 @@ async function audit(page, label, theme) {
 }
 
 async function login(page, { role, phone, name = 'Test User' }) {
-  const isDriver = role === 'driver';
-  await page.goto('/');
-  await expect(page.locator('.landing-screen')).toBeVisible();
-  await page.locator(isDriver ? '.landing-card .btn.driver.big' : '.landing-card .btn.primary.big').click();
-  await expect(page.locator('.login-screen')).toBeVisible();
-  await page.locator('input[type="tel"]').fill(phone);
-  await page.locator('form.card button.btn').click();
-  const otp = await waitForOtp(phone);
-  await page.locator('input[inputmode="numeric"]').fill(otp);
-  await page.locator('input[placeholder="Thabo"]').fill(name);
-  await page.locator('form.card button.btn').click();
+  await loginWithPin(page, { role, phone, name });
 }
 
 test.describe.configure({ mode: 'serial' });

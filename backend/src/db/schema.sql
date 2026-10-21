@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   phone         TEXT UNIQUE NOT NULL,
   name          TEXT,
   email         TEXT,
+  pin_hash      TEXT,                                   -- salted scrypt hash of the login PIN; NULL until first set
   role          TEXT NOT NULL DEFAULT 'customer',       -- 'customer' | 'driver' | 'admin'
   driver_status TEXT,                                   -- NULL/'approved' | 'pending' | 'rejected' | 'suspended'
   driver_rejection_reason TEXT,
@@ -133,14 +134,9 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_payments_trip ON payments(trip_id);
 
--- Phone OTP verification
-CREATE TABLE IF NOT EXISTS otps (
-  phone      TEXT PRIMARY KEY,
-  code       TEXT NOT NULL,
-  expires_at TIMESTAMPTZ NOT NULL,
-  attempts   INTEGER NOT NULL DEFAULT 0,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- Login is phone + a 6-digit PIN (see services/auth.js). The PIN is stored only
+-- as a salted scrypt hash in users.pin_hash; repeated wrong PINs are throttled
+-- in memory/DB (services/rateLimit.js), not by a short-lived code row.
 
 -- Web push (VAPID) subscriptions per user
 CREATE TABLE IF NOT EXISTS push_subscriptions (

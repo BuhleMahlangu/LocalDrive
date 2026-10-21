@@ -4,14 +4,16 @@ info:
   version: 0.4.0
   description: |
     Backend for the community micro-transit ride-booking app, priced in ZAR.
-    Multiple vetted drivers are dispatched; customers sign in with SMS OTP and
-    can pay cash or by Yoco card. The service area (town + map centre) is a
-    runtime setting the owner configures in the app, exposed publicly via
-    `GET /api/public/config`.
+    Multiple vetted drivers are dispatched; customers sign in with a phone
+    number and a 6-digit PIN and can pay cash or by Yoco card. The service area
+    (town + map centre) is a runtime setting the owner configures in the app,
+    exposed publicly via `GET /api/public/config`.
 
-    Auth: request an OTP, then verify it to receive a `token` (JWT). Send the
-    token as `Authorization: Bearer <token>` on role-gated routes. The owner
-    driver's phone can also hit customer routes (to preview the app).
+    Auth: sign in with a phone + PIN to receive a `token` (JWT). Send the token
+    as `Authorization: Bearer <token>` on role-gated routes (or rely on the
+    HttpOnly cookie set at login). The owner driver's phone can also hit customer
+    routes (to preview the app). Repeated wrong PINs are throttled per phone and
+    per IP (429 + `Retry-After`).
   contact:
     name: DriveLocal
 servers:
@@ -19,7 +21,7 @@ servers:
     description: Local development
 tags:
   - name: Auth
-    description: SMS OTP sign-in
+    description: Phone + PIN sign-in
   - name: Public
     description: Open, no auth required
   - name: Customer
@@ -49,21 +51,35 @@ components:
       properties:
         error: { type: string }
         code: { type: string, nullable: true }
-    OtpRequest:
+    AccountStatus:
       type: object
-      required: [phone, role]
+      required: [phone, exists, hasPin]
       properties:
-        phone: { type: string, example: "+27000000000" }
-        role: { type: string, enum: [customer, driver] }
-    OtpVerify:
+        phone: { type: string, example: "+27820000000", description: "Normalised E.164 phone" }
+        exists: { type: boolean, description: "Whether an account already exists for this phone" }
+        hasPin: { type: boolean, description: "Whether a PIN has been set (false → show the create-PIN step)" }
+    PinSetup:
       type: object
-      required: [phone, code, role]
+      required: [phone, pin]
       properties:
-        phone: { type: string, example: "+27000000000" }
-        code: { type: string, example: "482915", description: "The random 6-digit code delivered by SMS/WhatsApp (or email); logged to the server console in development when no provider is configured" }
+        phone: { type: string, example: "+27820000000" }
+        pin: { type: string, example: "482915", description: "Exactly 6 digits; stored only as a salted scrypt hash" }
         role: { type: string, enum: [customer, driver] }
-        name: { type: string, nullable: true, description: "Optional profile name on first login" }
+        name: { type: string, nullable: true, description: "Optional profile name on first sign-in" }
         email: { type: string, nullable: true }
+    PinLogin:
+      type: object
+      required: [phone, pin]
+      properties:
+        phone: { type: string, example: "+27820000000" }
+        pin: { type: string, example: "482915", description: "The 6-digit PIN set at signup" }
+        role: { type: string, enum: [customer, driver] }
+    PinChange:
+      type: object
+      required: [currentPin, newPin]
+      properties:
+        currentPin: { type: string, example: "482915" }
+        newPin: { type: string, example: "135790", description: "Exactly 6 digits" }
     User:
       type: object
       properties:
@@ -318,52 +334,123 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/UpsertSpotBody' }
 
-  /api/auth/otp/request:
+  /api/auth/account:
     post:
       tags: [Auth]
-      summary: Request an SMS one-time code
+      summary: Check whether a phone already has an account/PIN
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/OtpRequest' }
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string, example: "+27820000000" }
       responses:
         "200":
-          description: Code sent / queued
+          description: Account status (drives the create-PIN vs enter-PIN step)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AccountStatus' }
+        "400":
+          description: Invalid phone number
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        "429":
+          description: Rate limited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/auth/pin/setup:
+    post:
+      tags: [Auth]
+      summary: First-time sign-in — create the account and set a PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PinSetup' }
+      responses:
+        "200":
+          description: Account created / PIN set; sets the auth cookie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthOk' }
+        "400":
+          description: Invalid phone/PIN, or the number already has a PIN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        "429":
+          description: Rate limited (too many attempts)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/auth/pin/login:
+    post:
+      tags: [Auth]
+      summary: Sign in with phone + PIN
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PinLogin' }
+      responses:
+        "200":
+          description: Authenticated; sets the auth cookie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthOk' }
+        "401":
+          description: Incorrect phone number or PIN
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        "429":
+          description: Too many wrong attempts (see Retry-After)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+  /api/auth/pin/change:
+    post:
+      tags: [Auth]
+      summary: Change the signed-in user's PIN
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PinChange' }
+      responses:
+        "200":
+          description: PIN changed
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  phone: { type: string }
-                  expiresInSeconds: { type: integer }
-                  dev: { type: boolean, description: "true when no SMS/email provider is configured, so the code was only logged to the server console (development)" }
-                  delivery: { type: string, enum: [sms, email, console] }
-        "429":
-          description: Rate limited (daily or per-window)
+                  success: { type: boolean }
+        "400":
+          description: Current PIN incorrect, or the new PIN is invalid
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-  /api/auth/otp/verify:
+  /api/auth/logout:
     post:
       tags: [Auth]
-      summary: Verify the code and receive a JWT
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/OtpVerify' }
+      summary: Clear the auth cookie
       responses:
         "200":
-          description: Authenticated
+          description: Logged out
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/AuthOk' }
-        "401":
-          description: Bad / expired / exhausted code
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Error' }
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
   /api/auth/me:
     get:
       tags: [Auth]
@@ -380,7 +467,7 @@ paths:
   /api/public/config:
     get:
       tags: [Public]
-      summary: Public app config (service area + OTP delivery channel)
+      summary: Public app config (service area + auth method)
       responses:
         "200":
           description: OK
@@ -396,10 +483,10 @@ paths:
                       lat: { type: number, nullable: true, description: "Map centre latitude, or null when unset" }
                       lng: { type: number, nullable: true, description: "Map centre longitude, or null when unset" }
                       radiusKm: { type: number }
-                  otpDelivery:
+                  auth:
                     type: string
-                    enum: [sms, email, console]
-                    description: "How login codes are delivered. 'email' means the login screen must collect an email address; 'console' is development only."
+                    enum: [pin]
+                    description: "The login method. Always 'pin' (phone + 6-digit PIN)."
 
   /api/public/trips/{id}/live:
     get:

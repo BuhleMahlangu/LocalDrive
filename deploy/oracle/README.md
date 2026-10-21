@@ -16,9 +16,10 @@ always on. It uses the exact container layout from `docker-compose.yml` /
 
 ## Prereqs you already have
 
-- Your real `backend/.env` (VAPID keys, JWT secret, `DRIVER_PHONE`, and a real
-  OTP delivery path — SMS provider or SMTP — plus `SERVICE_AREA_*` for the town
-  you serve). Production refuses to start without these.
+- Your real `backend/.env` (VAPID keys, JWT secret, `DRIVER_PHONE`, and
+  `SERVICE_AREA_*` for the town you serve). Production refuses to start without
+  these. An SMS provider and SMTP are optional — login uses a phone + PIN, SMS
+  powers SOS alerts, email sends notifications.
 - A **domain** pointing at the VM's public IP. This is *required*: web push +
   PWA install + geolocation all need HTTPS, and Caddy only issues Let's Encrypt
   certificates for real domains (it won't for a bare IP). You have two options:

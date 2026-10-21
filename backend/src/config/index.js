@@ -54,16 +54,17 @@ const config = {
     from: process.env.SMTP_FROM || process.env.SMTP_USER || 'DriveLocal <no-reply@drivelocal.co.za>',
     replyTo: process.env.SMTP_REPLY_TO,
   },
-  // Real SMS OTP delivery (see services/sms.js). Set SMS_PROVIDER to one of
-  // 'whatsapp' | 'africastalking' | 'twilio' | 'clicksend' plus that provider's
-  // credentials. In development and tests, messages are logged to the console
-  // instead of sent unless SMS_FORCE=true (so local work never burns SMS credit).
+  // SMS delivery (see services/sms.js). Used for SOS emergency alerts; login no
+  // longer sends OTP codes. Set SMS_PROVIDER to one of 'whatsapp' |
+  // 'africastalking' | 'twilio' | 'clicksend' plus that provider's credentials.
+  // In development and tests, messages are logged to the console instead of sent
+  // unless SMS_FORCE=true (so local work never burns SMS credit).
   sms: {
     provider: process.env.SMS_PROVIDER,
     // Force real sending in dev/test (used by the E2E smoke run to assert the
     // exact HTTP request per provider). Without it dev/test log only.
     force: process.env.SMS_FORCE === 'true',
-    // WhatsApp Cloud API (Meta) — preferred for SA: free tier, cheapest OTPs.
+    // WhatsApp Cloud API (Meta) — preferred for SA: free tier.
     whatsappToken: process.env.WHATSAPP_ACCESS_TOKEN,
     whatsappPhoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
     whatsappOtpTemplate: process.env.WHATSAPP_OTP_TEMPLATE,
@@ -87,22 +88,6 @@ const config = {
     .split(',').map((s) => s.trim()).filter(Boolean),
 };
 
-// Env-level readiness checks (kept here, not imported from sms.js/email.js, to
-// avoid a config <-> service circular import).
-function otpEmailReady() {
-  return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-}
-
-function otpSmsReady() {
-  switch (process.env.SMS_PROVIDER) {
-    case 'whatsapp': return !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
-    case 'africastalking': return !!(process.env.AT_API_KEY && process.env.AT_USERNAME);
-    case 'twilio': return !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM);
-    case 'clicksend': return !!(process.env.CLICKSEND_USERNAME && process.env.CLICKSEND_API_KEY);
-    default: return false;
-  }
-}
-
 // Fail fast in production: never run with a known default secret or without the
 // owner-driver phone configured.
 if (nodeEnv === 'production') {
@@ -121,13 +106,9 @@ if (nodeEnv === 'production') {
   if (!hasAreaEnv) {
     problems.push('SERVICE_AREA_LAT and SERVICE_AREA_LNG must be set to the town centre (or configure it in Admin → Settings before going live)');
   }
-  // A real login code needs a real delivery path: SMS (see services/sms.js) or
-  // email OTP via SMTP. There is no fixed-code fallback in production — without
-  // a delivery path nobody could sign in, and a static code would let anyone
-  // sign in as anyone.
-  if (!otpSmsReady() && !otpEmailReady()) {
-    problems.push('No OTP delivery path configured — set SMS_PROVIDER + credentials (see .env.example), or SMTP_HOST/SMTP_USER/SMTP_PASS for email OTP');
-  }
+  // A PIN + throttle protects login; no OTP delivery path is required. This is
+  // deliberate: a 6-digit PIN is only safe because checkPinLimit() caps guesses
+  // per phone and per IP (see services/rateLimit.js).
   if (problems.length) {
     throw new Error(`DriveLocal refuses to start in production:\n - ${problems.join('\n - ')}`);
   }

@@ -67,7 +67,7 @@ function main() {
   }
 
   console.log('\nSeed complete:');
-  console.log(`  Owner -> ${adminPhone} (passwordless, OTP by SMS / console in dev)`);
+  console.log(`  Owner -> ${adminPhone} (sign in with this number + a PIN you set on first login)`);
   if (customerPhone) console.log(`  Customer -> ${customerPhone}`);
   console.log('Set your name, vehicle and rates in the driver Profile screen.');
 }

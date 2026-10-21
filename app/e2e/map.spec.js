@@ -1,7 +1,7 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
 import { uploadIdentity } from './identity.js';
-import { waitForOtp } from './otp.js';
+import { loginWithPin } from './pin.js';
 
 // Map regressions that only show up in a real browser: tiles actually painting,
 // and the live-tracking marker being *moved* rather than destroyed and rebuilt.
@@ -47,8 +47,12 @@ test('map tiles load and carry the required OpenStreetMap attribution', async ({
   await expect(page.locator('.login-screen')).toBeVisible();
   await page.locator('input[type="tel"]').fill('+27710001122');
   await page.locator('form.card button.btn').click();
-  await page.locator('input[inputmode="numeric"]').fill(OTP);
+  // Fresh test number → the setup step (PIN + confirm + name).
+  await page.locator('input[type="password"]').first().waitFor();
   await page.locator('input[placeholder="Thabo"]').fill('Map Tester');
+  const pins = page.locator('input[type="password"]');
+  await pins.nth(0).fill('100011');
+  await pins.nth(1).fill('100011');
   await page.locator('form.card button.btn').click();
   await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
 
@@ -254,16 +258,7 @@ async function drive(ctx, cust, tripId, lat, lng, label) {
 
 async function login(page, { role, phone, name = 'Test User' }) {
   const isDriver = role === 'driver';
-  await page.goto('/');
-  await expect(page.locator('.landing-screen')).toBeVisible();
-  await page.locator(isDriver ? '.landing-card .btn.driver.big' : '.landing-card .btn.primary.big').click();
-  await expect(page.locator('.login-screen')).toBeVisible();
-  await page.locator('input[type="tel"]').fill(phone);
-  await page.locator('form.card button.btn').click();
-  const otp = await waitForOtp(phone);
-  await page.locator('input[inputmode="numeric"]').fill(otp);
-  await page.locator('input[placeholder="Thabo"]').fill(name);
-  await page.locator('form.card button.btn').click();
+  await loginWithPin(page, { role, phone, name });
   if (isDriver) await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
   else await expect(page.locator('.topbar:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });
 }

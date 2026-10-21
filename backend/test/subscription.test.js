@@ -16,14 +16,6 @@ const repo = require('../src/db/repository');
 const { createApp } = require('../src/app');
 const { signToken } = require('../src/middleware');
 
-const sms = require('../src/services/sms');
-const sentOtps = new Map();
-sms.send = async ({ to, body }) => {
-  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
-  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
-  return { logged: true };
-};
-
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
   tripAccepted() {}, tripArrived() {}, paymentUpdated() {},
@@ -75,11 +67,18 @@ function seedCustomerIdentity(userId) {
   });
 }
 
+function pinFor(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.slice(-6).padStart(6, '0');
+}
 async function loginCustomer(phone, name) {
-  await api('POST', '/api/auth/otp/request', { phone, role: 'customer' });
-  const code = sentOtps.get(phone.replace(/[^+\d]/g, ''));
-  assert.ok(code, `otp code captured for ${phone}`);
-  const res = await api('POST', '/api/auth/otp/verify', { phone, code, role: 'customer', name });
+  const pin = pinFor(phone);
+  const setup = await api('POST', '/api/auth/pin/setup', { phone, pin, role: 'customer', name });
+  if (setup.status === 200) {
+    seedCustomerIdentity(setup.json.user.id);
+    return { token: setup.json.token, user: setup.json.user };
+  }
+  const res = await api('POST', '/api/auth/pin/login', { phone, pin, role: 'customer' });
   assert.equal(res.status, 200);
   seedCustomerIdentity(res.json.user.id);
   return { token: res.json.token, user: res.json.user };

@@ -1,40 +1,24 @@
-// Small in-memory rate limiter for OTP requests and verify attempts.
-// - Per phone: max MAX_PER_WINDOW requests in WINDOW_MS (prevents SMS-bombing).
-// - Per phone per day: max MAX_PER_DAY (caps the real cost of OTP SMS messages).
-// - Verify: max MAX_VERIFY_PER_WINDOW attempts per phone per WINDOW_MS.
-
-const config = require('../config');
+// Small in-memory rate limiter for PIN login/sign-up.
+//
+// A 6-digit PIN has only 10^6 combinations, so throttling is a security control,
+// not just an abuse control: checkPinLimit() caps attempts per phone per window
+// and is deliberately NOT relaxed in dev/test (login brute-force protection must
+// behave the same everywhere). checkPinIpLimit() caps attempts per client IP so
+// one device can't spray many phone numbers.
 
 const persist = process.env.RATE_LIMIT_PERSIST === 'true';
 let repo = null;
 if (persist) repo = require('../db/repository');
 
 const WINDOW_MS = 60 * 1000;
-const MAX_PER_WINDOW = 3;
-const MAX_PER_DAY = 10;
-const MAX_VERIFY_PER_WINDOW = 5;
+// Attempts per phone per window before a 429. Five wrong PINs costs 10^6 / 5
+// guesses per minute at worst across many IPs — impractical, and the per-IP cap
+// below closes the distributed case.
+const MAX_PIN_PER_WINDOW = 5;
+const MAX_PIN_PER_IP = 20;
 
-// The *request* caps exist for real SMS delivery (cost + bombing; see the
-// TODO in services/sms.js) and they are the ones that break legitimate
-// local/CI activity: the e2e suite signs the same owner phone in from several
-// specs inside one window. Relax them in dev/test only. The verify cap is
-// deliberately left alone so login brute-force protection is identical in
-// every environment.
-const isProd = config.nodeEnv === 'production';
-const OTP_MAX_PER_WINDOW = isProd ? MAX_PER_WINDOW : 1000;
-const OTP_MAX_PER_DAY = isProd ? MAX_PER_DAY : 10000;
-
-const buckets = new Map();
-const verifyBuckets = new Map();
+const pinBuckets = new Map();
 const ipBuckets = new Map();
-
-function prune() {
-  if (buckets.size <= 5000) return;
-  const today = new Date().toISOString().slice(0, 10);
-  for (const [key, rec] of buckets) {
-    if (rec.day !== today) buckets.delete(key);
-  }
-}
 
 // ---------- Optional DB-backed persistence (shared across processes/restarts) ----------
 function dbCheck(key, max, ttlMs) {
@@ -55,90 +39,87 @@ function dbCheck(key, max, ttlMs) {
   return { ok: true, retryAfterSec: 0 };
 }
 
-function dbCheckOtp(phone) {
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const midnight = new Date(now);
-  midnight.setUTCDate(midnight.getUTCDate() + 1);
-  midnight.setUTCHours(0, 0, 0, 0);
-  const dailyTtlMs = Math.max(1, midnight.getTime() - now.getTime());
-  const dayRes = dbCheck(`otp:daily:${phone}:${today}`, OTP_MAX_PER_DAY, dailyTtlMs);
-  if (!dayRes.ok) return { ok: false, code: 'DAILY_LIMIT', retryAfterSec: 60 };
-  const winRes = dbCheck(`otp:win:${phone}`, OTP_MAX_PER_WINDOW, WINDOW_MS);
-  if (!winRes.ok) return { ok: false, code: 'TOO_FREQUENT', retryAfterSec: winRes.retryAfterSec };
-  return { ok: true };
-}
-
-// IPv6 / behind a proxy "IP" strings are fine as opaque keys.
-function checkOtpIpLimit(ip) {
-  if (!ip || isProd === false) return { ok: true };
+function checkPinLimit(phone) {
   if (persist) {
-    const res = dbCheck(`ip:win:${ip}`, 12, WINDOW_MS);
-    if (!res.ok) return { ok: false, code: 'IP_TOO_FREQUENT', retryAfterSec: res.retryAfterSec };
-    return { ok: true };
+    const res = dbCheck(`pin:win:${phone}`, MAX_PIN_PER_WINDOW, WINDOW_MS);
+    return res.ok ? { ok: true } : { ok: false, retryAfterSec: res.retryAfterSec };
   }
   const nowMs = Date.now();
-  let rec = ipBuckets.get(ip);
-  if (!rec || !rec.timestamps || rec.timestamps.length === 0 || nowMs - rec.timestamps[rec.timestamps.length - 1] > 60 * 60 * 1000) {
-    rec = { timestamps: [] };
-    ipBuckets.set(ip, rec);
-  }
-  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
-  if (rec.timestamps.length >= 12) {
-    const oldest = rec.timestamps[0];
-    const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
-    return { ok: false, code: 'IP_TOO_FREQUENT', retryAfterSec };
-  }
-  rec.timestamps.push(nowMs);
-  return { ok: true };
-}
-
-function checkOtpLimit(phone) {
-  if (persist) return dbCheckOtp(phone);
-  const nowMs = Date.now();
-  const today = new Date().toISOString().slice(0, 10);
-  let rec = buckets.get(phone);
-  if (!rec || rec.day !== today) {
-    rec = { day: today, timestamps: [] };
-    buckets.set(phone, rec);
-  }
-
-  if (rec.timestamps.length >= OTP_MAX_PER_DAY) {
-    return { ok: false, code: 'DAILY_LIMIT', retryAfterSec: 60 };
-  }
-
-  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
-  if (rec.timestamps.length >= OTP_MAX_PER_WINDOW) {
-    const oldest = rec.timestamps[0];
-    const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
-    return { ok: false, code: 'TOO_FREQUENT', retryAfterSec };
-  }
-
-  rec.timestamps.push(nowMs);
-  prune();
-  return { ok: true };
-}
-
-function checkVerifyLimit(phone) {
-  if (persist) {
-    const res = dbCheck(`verify:win:${phone}`, MAX_VERIFY_PER_WINDOW, WINDOW_MS);
-    if (!res.ok) return { ok: false, retryAfterSec: res.retryAfterSec };
-    return { ok: true };
-  }
-  const nowMs = Date.now();
-  let rec = verifyBuckets.get(phone);
+  let rec = pinBuckets.get(phone);
   if (!rec) {
     rec = { timestamps: [] };
-    verifyBuckets.set(phone, rec);
+    pinBuckets.set(phone, rec);
   }
   rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
-  if (rec.timestamps.length >= MAX_VERIFY_PER_WINDOW) {
+  if (rec.timestamps.length >= MAX_PIN_PER_WINDOW) {
     const oldest = rec.timestamps[0];
     const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
     return { ok: false, retryAfterSec };
   }
-  rec.timestamps.push(nowMs);
   return { ok: true };
 }
 
-module.exports = { checkOtpLimit, checkVerifyLimit, checkOtpIpLimit, limits: { otpPerWindow: OTP_MAX_PER_WINDOW, otpPerDay: OTP_MAX_PER_DAY, verifyPerWindow: MAX_VERIFY_PER_WINDOW } };
+// Record a failed PIN attempt (only failures count against the limit, so a user
+// whose PIN is correct is never throttled by their own successful logins).
+function recordPinFailure(phone) {
+  if (persist) {
+    dbCheck(`pin:win:${phone}`, MAX_PIN_PER_WINDOW, WINDOW_MS);
+    return;
+  }
+  const nowMs = Date.now();
+  let rec = pinBuckets.get(phone);
+  if (!rec) {
+    rec = { timestamps: [] };
+    pinBuckets.set(phone, rec);
+  }
+  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
+  rec.timestamps.push(nowMs);
+}
+
+// IPv6 / behind a proxy "IP" strings are fine as opaque keys.
+function checkPinIpLimit(ip) {
+  if (!ip) return { ok: true };
+  if (persist) {
+    const res = dbCheck(`pin:ip:${ip}`, MAX_PIN_PER_IP, WINDOW_MS);
+    return res.ok ? { ok: true } : { ok: false, retryAfterSec: res.retryAfterSec };
+  }
+  const nowMs = Date.now();
+  let rec = ipBuckets.get(ip);
+  if (!rec) {
+    rec = { timestamps: [] };
+    ipBuckets.set(ip, rec);
+  }
+  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
+  if (rec.timestamps.length >= MAX_PIN_PER_IP) {
+    const oldest = rec.timestamps[0];
+    const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - nowMs) / 1000));
+    return { ok: false, retryAfterSec };
+  }
+  return { ok: true };
+}
+
+// Record a failed attempt against a client IP (same rationale as the phone cap:
+// only failures count, so a busy but legitimate user is never locked out).
+function recordPinIpFailure(ip) {
+  if (!ip) return;
+  if (persist) {
+    dbCheck(`pin:ip:${ip}`, MAX_PIN_PER_IP, WINDOW_MS);
+    return;
+  }
+  const nowMs = Date.now();
+  let rec = ipBuckets.get(ip);
+  if (!rec) {
+    rec = { timestamps: [] };
+    ipBuckets.set(ip, rec);
+  }
+  rec.timestamps = rec.timestamps.filter((t) => nowMs - t < WINDOW_MS);
+  rec.timestamps.push(nowMs);
+}
+
+module.exports = {
+  checkPinLimit,
+  recordPinFailure,
+  checkPinIpLimit,
+  recordPinIpFailure,
+  limits: { pinPerWindow: MAX_PIN_PER_WINDOW, pinPerIp: MAX_PIN_PER_IP },
+};

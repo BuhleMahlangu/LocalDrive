@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS users (
   phone         TEXT UNIQUE NOT NULL,
   name          TEXT,
   email         TEXT,
+  pin_hash      TEXT,
   role          TEXT NOT NULL DEFAULT 'customer',
   -- role: 'customer' | 'driver' | 'admin'  (admin = platform owner, also a driver)
   -- driver_status: NULL/approved = can drive; pending = awaiting vetting;
@@ -181,6 +182,7 @@ CREATE TABLE IF NOT EXISTS otps (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Kept for older databases; login no longer uses OTP codes (phone + PIN now).
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   user_id    TEXT NOT NULL,
   endpoint   TEXT NOT NULL,
@@ -313,6 +315,7 @@ CREATE INDEX IF NOT EXISTS idx_sos_trip ON sos_alerts(trip_id, created_at);
   ensureColumn('users', 'driver_status', 'TEXT');
   ensureColumn('users', 'driver_rejection_reason', 'TEXT');
   ensureColumn('users', 'id_number', 'TEXT');
+  ensureColumn('users', 'pin_hash', 'TEXT');
 
   // Legacy single-driver databases: the owner phone becomes the platform admin
   // (who also drives), and any pre-existing driver row counts as already vetted.

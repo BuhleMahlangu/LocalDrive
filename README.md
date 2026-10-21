@@ -17,7 +17,7 @@ LocalDrive/
 |-------|------|
 | Frontend | React 18 + Vite + Leaflet (OSM maps) + Socket.io client, PWA installable |
 | Backend | Node.js + Express + Socket.io + better-sqlite3 (SQLite) |
-| Auth | Phone OTP (WhatsApp Cloud API / Africa's Talking / Twilio / ClickSend, or email OTP via SMTP) + JWT — random per-request code, logged to the console in dev when no provider is set |
+| Auth | Phone + 6-digit PIN (set at signup) + JWT — salted scrypt hashes, throttled per phone and per IP. No OTP, no passwords |
 | Payments | Yoco hosted checkout (card) — cash by default until `YOCO_SECRET_KEY` is set |
 | Revenue | Monthly **driver subscription** (freemium: owner free, others paid) — no per-ride commission |
 | Real-time | Socket.io (driver GPS streaming every 3s + live trip pushes) |
@@ -51,10 +51,11 @@ or just log in with that number.
 | Owner / driver | your `DRIVER_PHONE` |
 | Customer | any other phone you sign in with |
 
-**OTP in development:** with no SMS/SMTP provider configured the code is random
-and printed to the **server console** (watch the terminal running the backend).
-With a provider configured, real codes are delivered by WhatsApp/SMS/email. There
-is no fixed code.
+**PIN login:** sign in with your phone + a 6-digit PIN. The first time you sign in
+with a number, you set the PIN; after that you enter it. There are no passwords and
+no codes to wait for. Repeated wrong PINs are throttled (5 per minute per number,
+20 per minute per IP), so a forgotten PIN means waiting a minute, not a lockout —
+the owner can reset it if needed.
 
 > Because it's **one app**, logging in with the driver phone opens the **driver dashboard** (requests, online toggle, earnings, profile) and any other phone opens the **customer app**. Use "**Driver mode / Customer mode**" in the header to switch views without logging out.
 
@@ -65,7 +66,7 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 ## Features
 
 **Customer**
-- Start page to choose **customer / driver** login, OTP login (no passwords)
+- Start page to choose **customer / driver** login, PIN login (no passwords)
 - GPS auto-pickup + tap-map pickup & destination pins you can **re-adjust** at any time
 - Landmark chips + free-text "describe this place" notes (for areas without street names)
 - Real-time driver tracking, route line, live ZAR fare estimate
@@ -94,21 +95,22 @@ To see the full booking flow, open the app in **two windows** (e.g. normal + inc
 
 ## Environment configuration
 
-Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate automatically once their key is present.** With everything empty, the app runs on cash + OTP codes logged to the console (development only) + straight-line fare estimates.
+Copy `backend/.env.example` → `backend/.env` and fill in. **Features activate automatically once their key is present.** With everything empty, the app runs on cash + phone/PIN login + straight-line fare estimates.
 
 | Variable | Purpose |
 |----------|---------|
 | `DRIVER_PHONE` | The owner-driver's phone (E.164). Gates who may act as driver. Default `+27000000000` |
 | `JWT_SECRET` | Token signing. Production refuses to start unless it's a strong random value (32+ chars) |
-| *(OTP delivery)* | **WhatsApp Cloud API (recommended, free tier)**: set `SMS_PROVIDER=whatsapp` + `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` (+ `WHATSAPP_OTP_TEMPLATE` approved Authentication template). **SMS**: `SMS_PROVIDER=africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*`). **Email OTP via SMTP**: `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`). With none configured, the random code is logged to the server console (dev only — production refuses to start without a real delivery path). In dev/test codes are logged even when a provider is configured (no credit burned); set `SMS_FORCE=true` to send for real |
+| *(SMS — SOS only)* | **Optional.** `SMS_PROVIDER=whatsapp` + `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`, or `africastalking` / `twilio` / `clicksend` + that provider's credentials (`AT_*`, `TWILIO_*`, `CLICKSEND_*`). Powers emergency SOS alerts. In dev/test messages are logged to the console (no credit burned); set `SMS_FORCE=true` to send for real |
+| *(Email — notifications)* | **Optional.** `SMTP_HOST` / `SMTP_USER` / `SMTP_PASS` (+ optional `SMTP_PORT`, `SMTP_SECURE`, `SMTP_FROM`) for account/trip notification emails |
 | `YOCO_SECRET_KEY` / `YOCO_WEBHOOK_SECRET` | **Card payments** via Yoco hosted checkout; also sets `YOCO_SUCCESS_URL` / `YOCO_CANCEL_URL` to your HTTPS URLs |
 | `GOOGLE_MAPS_API_KEY` | True Google routing + polylines instead of straight-line estimates |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | **Web push** notifications (`npx web-push generate-vapid-keys`) |
 | `CORS_ORIGINS` | Comma-separated allowed origins (default `http://localhost:5173`) |
 
-OTP requests are **rate-limited** per phone (3 / 60s window, 10 / day) to stop SMS-bombing.
+PIN attempts are **rate-limited** per phone (5 failures / 60s window) and per IP (20 failures / 60s window); only failures count, so a correct login is never throttled.
 
-> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, **if no OTP delivery path is configured** (no SMS provider and no SMTP), **or if no service-area centre is set** (`SERVICE_AREA_LAT`/`LNG`). Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
+> **Production safety:** the backend **fails fast** on `NODE_ENV=production` if `JWT_SECRET` or `DRIVER_PHONE` are missing or weak, **or if no service-area centre is set** (`SERVICE_AREA_LAT`/`LNG`). Login is phone + PIN, so no OTP delivery path is required. Web push, geolocation and PWA install require **HTTPS** (or `localhost`).
 
 ## Tests, lint, backups
 
@@ -117,7 +119,7 @@ cd backend
 npm run seed        # create the owner/admin account (+ location)
 npm test            # unit tests (node --test, in-memory DB)
 npm run lint        # ESLint (also: cd app && npm run lint)
-npm run smoke       # end-to-end API test (server must be running first; run in dev mode so OTPs are logged)
+npm run smoke       # end-to-end API test (server must be running first)
 npm run backup      # SQLite online backup -> backend/backups (keeps last 14)
 
 cd app
@@ -127,7 +129,7 @@ npm run build       # production build + PWA service worker
 ## Roadmap / when you go live
 
 - **Enable card payments** — add real `YOCO_SECRET_KEY` + `YOCO_WEBHOOK_SECRET`, set success/cancel URLs to your HTTPS domain.
-- **OTP** — done: `SMS_PROVIDER=whatsapp` (free-tier Meta Cloud API) or `africastalking|twilio|clicksend`, or SMTP email, switches to random per-request codes delivered out-of-band. Production requires a delivery path (no fixed code).
+- **Auth** — done: phone + a 6-digit PIN set at signup, stored as a salted scrypt hash and throttled per phone/IP. No OTP provider needed.
 - **Monetisation** — done: monthly **driver subscription** (freemium — the owner drives free, other drivers pay to receive bookings). Manage it in **Admin → Subscriptions**; drivers keep 100% of each fare. No per-ride commission.
 - **Real routing** — add a `GOOGLE_MAPS_API_KEY` for true road distances/ETAs.
 - **HTTPS hosting** — required for web push, in-app geolocation and secure payments. Free path (Oracle Cloud Always Free + DuckDNS) in `DEPLOY.md` §15.

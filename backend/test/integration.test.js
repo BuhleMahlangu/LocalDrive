@@ -17,16 +17,6 @@ const repo = require('../src/db/repository');
 const { createApp } = require('../src/app');
 const { signToken } = require('../src/middleware');
 
-// Tests never actually send an SMS: capture the code the way a real recipient
-// would receive it, so logins use the same random OTP the server generated.
-const sms = require('../src/services/sms');
-const sentOtps = new Map();
-sms.send = async ({ to, body }) => {
-  const code = (String(body).match(/\b(\d{6})\b/) || [])[1];
-  if (code) sentOtps.set(String(to).replace(/[^+\d]/g, ''), code);
-  return { logged: true };
-};
-
 // The API routes call `notify.*` for realtime pushes; a no-op stub is enough.
 const notify = {
   tripUpdated() {}, newTripToDriver() {}, scheduledTripAdded() {},
@@ -102,19 +92,21 @@ function seedCustomerIdentity(userId) {
   });
 }
 
-// Request an OTP, read the code the test captured, and return the issued token.
+// Sign in with a phone + PIN. First use sets the PIN; later calls log in with
+// the same deterministic PIN so a phone can be reused across tests.
+function pinFor(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.slice(-6).padStart(6, '0');
+}
 async function login(phone, role, name, email) {
-  const req = await api('POST', '/api/auth/otp/request', { phone, role });
-  assert.equal(req.status, 200, `otp request ok for ${phone} (${role})`);
-  const normalized = phone.replace(/[^+\d]/g, '');
-  const row = repo.getOtp(normalized);
-  assert.ok(row, `otp row stored for ${phone}`);
-  const code = sentOtps.get(normalized);
-  assert.ok(code, `otp code captured for ${phone}`);
-  const res = await api('POST', '/api/auth/otp/verify', {
-    phone, code, role, name, email,
-  });
-  assert.equal(res.status, 200, `otp verify ok for ${phone} (${role})`);
+  const pin = pinFor(phone);
+  const setup = await api('POST', '/api/auth/pin/setup', { phone, pin, role, name, email });
+  if (setup.status === 200) {
+    if (role === 'customer') seedCustomerIdentity(setup.json.user.id);
+    return { token: setup.json.token, user: setup.json.user };
+  }
+  const res = await api('POST', '/api/auth/pin/login', { phone, pin, role });
+  assert.equal(res.status, 200, `pin login ok for ${phone} (${role})`);
   assert.equal(res.json.success, true);
   if (role === 'customer') seedCustomerIdentity(res.json.user.id);
   return { token: res.json.token, user: res.json.user };
@@ -124,9 +116,8 @@ const DRIVER_PHONE = config.driverPhone || '+27000000000';
 const PICKUP = { lat: -26.2041, lng: 28.0473, address: 'Joburg CBD' };
 const DEST = { lat: -26.1076, lng: 28.0567, address: 'Sandton' };
 
-// The OTP rate limiter (3 / 60s per phone) makes repeated OTP logins with the
-// shared driver number flaky, so lifecycle tests sign a token for the driver
-// directly. The OTP + driver-gate flow itself is covered by the auth tests.
+// Lifecycle tests sign a token for the driver directly rather than logging in
+// repeatedly. The PIN + driver-gate flow itself is covered by the auth tests.
 function ensureDriver() {
   let driver = repo.getUserByPhone(DRIVER_PHONE, 'driver');
   if (!driver) {
@@ -237,14 +228,7 @@ test('auth: /auth/me returns the signed-in user', async () => {
 });
 
 test('auth: a stranger can apply as a driver (pending)', async () => {
-  const req = await api('POST', '/api/auth/otp/request', { phone: '+27829999999', role: 'driver' });
-  assert.equal(req.status, 200);
-  const normalized = '+27829999999';
-  const row = repo.getOtp(normalized);
-  assert.ok(row, 'otp row stored');
-  const res = await api('POST', '/api/auth/otp/verify', {
-    phone: normalized, code: sentOtps.get(normalized), role: 'driver',
-  });
+  const res = await api('POST', '/api/auth/pin/setup', { phone: '+27829999999', pin: '135790', role: 'driver' });
   assert.equal(res.status, 200);
   assert.equal(res.json.user.role, 'driver');
   assert.equal(res.json.user.driverStatus, 'pending');
@@ -860,11 +844,10 @@ test('scheduled trips hold a promo until activation, then consume it', async () 
   assert.equal(repo.getPromoByCode('WELCOME10').used_count, before + 1, 'promo consumed once on activation');
 });
 
-test('GET /api/public/config exposes the service area and OTP delivery channel', async () => {
+test('GET /api/public/config exposes the service area and auth method', async () => {
   const res = await api('GET', '/api/public/config');
   assert.equal(res.status, 200);
   assert.ok(res.json.serviceArea, 'serviceArea present');
-  // The login screen uses this to decide whether an email address is required.
-  assert.ok(['sms', 'email', 'console'].includes(res.json.otpDelivery), res.json.otpDelivery);
+  assert.equal(res.json.auth, 'pin');
 });
 

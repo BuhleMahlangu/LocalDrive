@@ -24,7 +24,7 @@ function parseCookieHeader(cookieHeader) {
 }
 
 // Prefer an explicit Bearer token, but fall back to the HttpOnly cookie issued
-// at verify-otp so tokens never have to live in client-side storage.
+// at PIN login so tokens never have to live in client-side storage.
 function extractToken(req) {
   const header = req.headers.authorization || '';
   if (header.startsWith('Bearer ')) return header.slice(7);

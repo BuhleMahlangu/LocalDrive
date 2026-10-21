@@ -1,29 +1,15 @@
-// Production startup guardrails around OTP delivery: with no SMS provider and
-// no SMTP configured, production must refuse to start. There is no fixed-code
-// fallback, so a delivery path is mandatory.
- 
+// Production startup guardrails. Login is phone + PIN now, so there is no OTP
+// delivery requirement; production still refuses to start without a strong JWT
+// secret, the owner phone, and a service-area centre.
+
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-// Keys that satisfy the *other* production requirements so any throw we see is
-// about the OTP guardrail specifically.
+// Keys that satisfy the production requirements.
 const BASE = {
   NODE_ENV: 'production',
   JWT_SECRET: 'x'.repeat(48),
   DRIVER_PHONE: '+27830000000',
-  SMS_PROVIDER: '',
-  WHATSAPP_ACCESS_TOKEN: '',
-  WHATSAPP_PHONE_NUMBER_ID: '',
-  AT_API_KEY: '',
-  AT_USERNAME: '',
-  TWILIO_ACCOUNT_SID: '',
-  TWILIO_AUTH_TOKEN: '',
-  TWILIO_FROM: '',
-  CLICKSEND_USERNAME: '',
-  CLICKSEND_API_KEY: '',
-  SMTP_HOST: '',
-  SMTP_USER: '',
-  SMTP_PASS: '',
   SERVICE_AREA_LAT: '-26.2155',
   SERVICE_AREA_LNG: '29.2916',
 };
@@ -50,44 +36,26 @@ function loadConfig(overrides = {}) {
   }
 }
 
-test('production refuses to start with no OTP delivery path', () => {
-  const { error } = loadConfig();
-  assert.ok(error, 'config should throw');
-  assert.match(error.message, /No OTP delivery path configured/);
+test('production starts without any OTP/SMS/SMTP configuration (PIN login)', () => {
+  const { config, error } = loadConfig();
+  assert.equal(error, undefined, 'no delivery path is required for PIN login');
+  assert.ok(config);
 });
 
-test('production refuses to start with SMS_PROVIDER set but no credentials', () => {
-  const { error } = loadConfig({ SMS_PROVIDER: 'twilio' });
+test('production refuses to start with a weak or missing JWT secret', () => {
+  const { error } = loadConfig({ JWT_SECRET: 'too-short' });
   assert.ok(error, 'config should throw');
-  assert.match(error.message, /No OTP delivery path configured/);
+  assert.match(error.message, /JWT_SECRET must be a strong random secret/);
 });
 
-test('no fixed-code escape hatch: production still refuses without a delivery path', () => {
-  // ALLOW_FIXED_OTP is no longer honoured — there is no fixed code at all.
-  const { error } = loadConfig({ ALLOW_FIXED_OTP: 'true' });
+test('production refuses to start without the owner phone', () => {
+  const { error } = loadConfig({ DRIVER_PHONE: '' });
   assert.ok(error, 'config should throw');
-  assert.match(error.message, /No OTP delivery path configured/);
-});
-
-test('production starts once a provider is fully configured', () => {
-  const cases = [
-    { SMS_PROVIDER: 'whatsapp', WHATSAPP_ACCESS_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '1' },
-    { SMS_PROVIDER: 'twilio', TWILIO_ACCOUNT_SID: 'AC1', TWILIO_AUTH_TOKEN: 't', TWILIO_FROM: '+27000000001' },
-    { SMS_PROVIDER: 'africastalking', AT_API_KEY: 'k', AT_USERNAME: 'app' },
-    { SMS_PROVIDER: 'clicksend', CLICKSEND_USERNAME: 'u', CLICKSEND_API_KEY: 'k' },
-    { SMTP_HOST: 'smtp.example.com', SMTP_USER: 'u', SMTP_PASS: 'p' },
-  ];
-  for (const overrides of cases) {
-    const { error } = loadConfig(overrides);
-    assert.equal(error, undefined, `should start with ${JSON.stringify(overrides)}`);
-  }
+  assert.match(error.message, /DRIVER_PHONE must be set/);
 });
 
 test('production refuses to start with no service-area centre', () => {
-  const { error } = loadConfig({
-    SMS_PROVIDER: 'clicksend', CLICKSEND_USERNAME: 'u', CLICKSEND_API_KEY: 'k',
-    SERVICE_AREA_LAT: '0', SERVICE_AREA_LNG: '0',
-  });
+  const { error } = loadConfig({ SERVICE_AREA_LAT: '0', SERVICE_AREA_LNG: '0' });
   assert.ok(error, 'config should throw');
   assert.match(error.message, /SERVICE_AREA_LAT and SERVICE_AREA_LNG/);
 });

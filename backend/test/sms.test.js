@@ -1,6 +1,7 @@
-// SMS provider dispatch + OTP code generation. Each node --test file runs in
-// its own process, so we can set provider env vars before config loads and
-// stub global.fetch to assert the exact HTTP request per provider.
+// SMS provider dispatch. Each node --test file runs in its own process, so we
+// can set provider env vars before config loads and stub global.fetch to assert
+// the exact HTTP request per provider. (Login uses a PIN now; SMS is used for
+// SOS alerts.)
 
 process.env.DB_FILE = ':memory:';
 process.env.NODE_ENV = 'test';
@@ -15,8 +16,6 @@ const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const sms = require('../src/services/sms');
-const auth = require('../src/services/auth');
-const repo = require('../src/db/repository');
 
 const realFetch = global.fetch;
 let calls = [];
@@ -124,24 +123,14 @@ test('in development, a configured provider still logs instead of sending (no cr
   }
 });
 
-test('requestOtp issues a random code and delivers it by SMS', async () => {
+test('send() dispatches a message through the configured provider', async () => {
   let sentBody = null;
   mockFetch((_url, opts) => {
     sentBody = new URLSearchParams(opts.body).get('Body');
     return jsonResponse(201, { sid: 'SM_yyy', status: 'queued' });
   });
 
-  const res = await auth.requestOtp({ phone: '+27839998888' });
-  assert.equal(res.delivery, 'sms');
-  assert.equal(res.dev, false);
-
-  // A real 6-digit code went out over SMS — never the fixed 123456.
-  const code = sentBody.match(/code is (\d{6})/)[1];
-  assert.ok(code !== '123456');
-  assert.equal(auth.hashOtp('+27839998888', code), repo.getOtp('+27839998888').code);
-
-  // And it verifies.
-  const verified = auth.verifyOtp({ phone: '+27839998888', code, role: 'customer', name: 'Test User' });
-  assert.equal(verified.success, true);
-  assert.ok(verified.token);
+  const res = await sms.send({ to: '+27839998888', body: 'DriveLocal: SOS alert test message' });
+  assert.equal(res.queued, true);
+  assert.match(sentBody, /SOS alert test message/);
 });

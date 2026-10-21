@@ -1,7 +1,7 @@
 // @ts-check
 import { test, expect } from '@playwright/test';
 import { uploadIdentity } from './identity.js';
-import { waitForOtp } from './otp.js';
+import { loginWithPin } from './pin.js';
 
 // Owner driver phone (mirrors config on the backend).
 const DRIVER_PHONE = process.env.VITE_DRIVER_PHONE || '+27000000000';
@@ -246,25 +246,7 @@ test('customer can log out back to the landing page', async ({ browser }) => {
 
 async function login(page, { role, phone, name = 'Test User' }) {
   const isDriver = role === 'driver';
-  await page.goto('/');
-  await expect(page.locator('.landing-screen')).toBeVisible();
-
-  // Landing has two big buttons: customer (primary) and driver.
-  if (isDriver) {
-    await page.locator('.landing-card .btn.driver.big').click();
-  } else {
-    await page.locator('.landing-card .btn.primary.big').click();
-  }
-
-  await expect(page.locator('.login-screen')).toBeVisible();
-  await page.locator('input[type="tel"]').fill(phone);
-  await page.locator('form.card button.btn').click();
-  await expect(page.locator('form.card button.btn')).toBeDisabled().catch(() => {});
-
-  const otp = await waitForOtp(phone);
-  await page.locator('input[inputmode="numeric"]').fill(otp);
-  await page.locator('input[placeholder="Thabo"]').fill(name);
-  await page.locator('form.card button.btn').click();
+  await loginWithPin(page, { role, phone, name });
 
   if (isDriver) {
     await expect(page.locator('.dash-header:visible, .side-nav:visible')).toBeVisible({ timeout: 20_000 });

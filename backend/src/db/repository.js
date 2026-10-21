@@ -223,6 +223,17 @@ module.exports = {
     return mapUser(row);
   },
 
+  // Raw PIN hash for a phone (never exposed via mapUser / the API). Used only by
+  // the auth service to verify a login.
+  getPinHash(phone) {
+    const row = db.prepare('SELECT pin_hash FROM users WHERE phone = ?').get(phone);
+    return row ? row.pin_hash : null;
+  },
+
+  setUserPin(userId, pinHash) {
+    db.prepare("UPDATE users SET pin_hash = ?, updated_at = datetime('now') WHERE id = ?").run(pinHash, userId);
+  },
+
   getDriver() {
     // Platform "rate card" driver: the admin owner by phone, falling back to the
     // oldest active (approved) driver account. Used ONLY for representative
@@ -730,27 +741,6 @@ module.exports = {
     ).get(driverId);
     if (!row) return null;
     return { lat: row.lat, lng: row.lng, heading: row.heading, accuracy: row.accuracy, timestamp: row.timestamp };
-  },
-
-  // ---------- OTP ----------
-  saveOtp(phone, code, expiresAtIso) {
-    db.prepare(
-      `INSERT INTO otps (phone, code, expires_at) VALUES (?, ?, ?)
-       ON CONFLICT(phone) DO UPDATE SET code = excluded.code, expires_at = excluded.expires_at,
-       attempts = 0, created_at = datetime('now')`,
-    ).run(phone, code, expiresAtIso);
-  },
-
-  getOtp(phone) {
-    return db.prepare('SELECT * FROM otps WHERE phone = ?').get(phone);
-  },
-
-  incrementOtpAttempts(phone) {
-    db.prepare('UPDATE otps SET attempts = attempts + 1 WHERE phone = ?').run(phone);
-  },
-
-  deleteOtp(phone) {
-    db.prepare('DELETE FROM otps WHERE phone = ?').run(phone);
   },
 
   // ---------- Trips ----------

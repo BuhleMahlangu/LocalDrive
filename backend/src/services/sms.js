@@ -1,12 +1,12 @@
-// SMS/OTP delivery abstraction.
+// SMS delivery abstraction (used for SOS emergency alerts; login is phone + PIN
+// and sends nothing).
 //
-// Configure one provider via env (see .env.example) and OTP codes are sent as
-// real SMS with a random per-request code. With no provider configured the
-// message is logged to the server console (development/test only — production
-// refuses to start without a provider, see config/index.js).
+// Configure one provider via env (see .env.example) and messages are sent as
+// real SMS. With no provider configured the message is logged to the server
+// console (development/test).
 //
 // Supported providers (SMS_PROVIDER):
-//   - whatsapp        WhatsApp Cloud API (Meta) — free tier / cheapest OTPs
+//   - whatsapp        WhatsApp Cloud API (Meta) — free tier
 //                     WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, optional WHATSAPP_OTP_TEMPLATE
 //   - africastalking  Africa's Talking (SA + rest of Africa) — AT_API_KEY, AT_USERNAME, optional AT_SENDER_ID
 //   - twilio          Twilio           — TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
@@ -30,7 +30,7 @@ function isConfigured() {
   }
 }
 
-// True when an OTP would actually leave the device: a provider is configured
+// True when a message would actually leave the device: a provider is configured
 // and we're not in the development/test console-only fallback (see send()).
 function deliversReal() {
   return isConfigured() && !consoleOnly();

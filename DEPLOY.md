@@ -10,7 +10,7 @@ The path below is the recommended **one-host** setup (frontend + API + WebSocket
 
 - A domain — a **free DuckDNS subdomain** works fine (e.g. `drivelocal.duckdns.org`), or your own domain.
 - A server with Node.js 18+ (we recommend Node 20/22 LTS). Ubuntu/Debian assumed below. **Oracle Cloud Always Free** (ARM Ampere, 4 cores / 24 GB) runs this comfortably at R0/month — see §15.
-- Real keys from: **Yoco** (card payments — optional for launch), VAPID keys for push (`npx web-push generate-vapid-keys`), and an **OTP provider** — WhatsApp Cloud API (free tier, recommended), or an SMS provider (Africa's Talking / Twilio / ClickSend), or SMTP email. See §13.
+- Real keys from: **Yoco** (card payments — optional for launch) and VAPID keys for push (`npx web-push generate-vapid-keys`). Login is **phone + a 6-digit PIN** (set at signup), so **no OTP provider is required**. SMS (WhatsApp/Africa's Talking/Twilio/ClickSend) and SMTP are optional — SMS powers SOS alerts, SMTP email sends notifications. See §13.
 
 ## 2. Directory layout
 
@@ -107,29 +107,22 @@ SERVICE_AREA_NAME=Kriel, Mpumalanga
 SERVICE_AREA_LAT=-26.2155
 SERVICE_AREA_LNG=29.2916
 SERVICE_AREA_RADIUS_KM=30
-# OTP delivery — production refuses to start unless a real path is configured.
-# There is no fixed-code fallback.
-# Recommended for SA: WhatsApp Cloud API (free tier / cheapest OTPs).
+# SMS is optional (SOS alerts only — login uses a PIN). Pick ONE SMS_PROVIDER:
+#   SMS_PROVIDER=whatsapp       → WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID
+#   SMS_PROVIDER=africastalking → AT_API_KEY, AT_USERNAME, AT_SENDER_ID
+#   SMS_PROVIDER=twilio         → TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
+#   SMS_PROVIDER=clicksend      → CLICKSEND_USERNAME, CLICKSEND_API_KEY, CLICKSEND_FROM
 SMS_PROVIDER=whatsapp
 WHATSAPP_ACCESS_TOKEN=...
 WHATSAPP_PHONE_NUMBER_ID=...
-WHATSAPP_OTP_TEMPLATE=drivelocal_otp      # approved Authentication template
-WHATSAPP_TEMPLATE_LANG=en
 
-# Email OTP (SMTP) — leave SMS_PROVIDER blank and set these three. The login
-# screen detects email-only mode and makes the email field required, so users
-# must enter an address to receive their code.
+# Email notifications (optional, Nodemailer + SMTP). Not needed for login.
 # SMTP_HOST=smtp.yourprovider.com
 # SMTP_PORT=587
 # SMTP_USER=you@yourdomain.com
 # SMTP_PASS=...
 # SMTP_FROM=DriveLocal <no-reply@yourdomain.com>
 
-# Alternative OTP providers (pick ONE for SMS_PROVIDER):
-#   SMS_PROVIDER=africastalking  → AT_API_KEY, AT_USERNAME, AT_SENDER_ID
-#   SMS_PROVIDER=twilio          → TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
-#   SMS_PROVIDER=clicksend       → CLICKSEND_USERNAME, CLICKSEND_API_KEY, CLICKSEND_FROM
-#   Email fallback (any provider) → SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM
 CORS_ORIGINS=https://drivelocal.example.co.za
 DB_DRIVER=sqlite
 GOOGLE_MAPS_API_KEY=             # optional, enables real roads/ETA
@@ -144,7 +137,7 @@ YOCO_SUCCESS_URL=https://drivelocal.example.co.za/?payment=success
 YOCO_CANCEL_URL=https://drivelocal.example.co.za/?payment=cancelled
 ```
 
-> The server **will not start** in production without JWT + DRIVER_PHONE. That's deliberate. It **also refuses to start without a working OTP delivery path** (WhatsApp/SMS or SMTP) and **without a service-area centre** — so you can never accidentally ship a fixed code to real users or run with the map pointing at nowhere.
+> The server **will not start** in production without a strong `JWT_SECRET`, a `DRIVER_PHONE`, and a **service-area centre** (`SERVICE_AREA_LAT`/`LNG`) — so you can never accidentally run with a weak secret or a map pointing at nowhere. No OTP delivery path is required: login is phone + a 6-digit PIN, throttled per phone and per IP (5 failures / minute, then `429` with `Retry-After`).
 
 ## 8. Enabling card payments (Yoco)
 
@@ -174,7 +167,7 @@ npm run backup    # confirm a snapshot is written
 Run through this on the live URL before telling anyone:
 
 - [ ] **HTTPS works and the PWA installs** (browser "Add to Home screen" / install prompt).
-- [ ] **Sign-in works with a real code** — the OTP is delivered by WhatsApp/SMS/email. Sign in as both customer and driver.
+- [ ] **Sign-in works** — enter a phone number, set a 6-digit PIN the first time (or enter it on return). Sign in as both customer and driver.
 - [ ] **Location permission granted** — the #1 gotcha. On a phone it must be allowed for the domain (Settings → Privacy → Location); without it the customer can't pick up automatically and push needs HTTPS anyway.
 - [ ] **Book a trip end→end**: request → driver accepts → driver taps "I've arrived" → customer sees the arrived card → start trip → fare confirm → rating. Watch for live socket updates (no CORS / WS proxy errors in the browser console).
 - [ ] **Share link** `GET /api/public/trips/<id>/live` opens without logging in.
@@ -205,10 +198,14 @@ Geolocation, push, payments and PWA install all require **HTTPS** on the domain 
   see the subscription model below.)
 - Web push only works on HTTPS with a service worker — the frontend build wires
   push handlers into the generated `sw.js` automatically.
-- **OTP delivery** uses whichever provider is configured (WhatsApp Cloud API
-  recommended, or Africa's Talking / Twilio / ClickSend / SMTP email). In
-  development and tests the code is logged to the server console instead of being
-  sent. Production refuses to boot without a real delivery path.
+- **Login is phone + a 6-digit PIN**, set at signup and stored only as a salted
+  scrypt hash. Repeated wrong PINs are throttled per phone (5 / minute) and per IP
+  (20 / minute); only failures count, so a correct login is never locked out.
+  There is no OTP and no code delivery path to configure.
+- **SMS** (WhatsApp Cloud API / Africa's Talking / Twilio / ClickSend) is optional
+  and used for **SOS alerts only**. **SMTP email** is optional and used for
+  notifications. In development and tests messages are logged to the server
+  console instead of being sent.
 - **Service area** (the town the app serves) is set from `SERVICE_AREA_*` or at
   runtime in **Admin → Settings**; the saved value wins. It centres the maps and
   bounds how far they can be panned. Production refuses to boot without a centre.

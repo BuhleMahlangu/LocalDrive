@@ -28,8 +28,8 @@ jobs:
       - run: npm run lint
       - run: npm test
 
-      # Full-stack smoke: boot the real server (dev mode = fixed OTP + console
-      # SMS), wait for /health, then run scripts/smoke.js against it.
+      # Full-stack smoke: boot the real server, wait for /health, then run
+      # scripts/smoke.js against it (PIN login; SMS only logs in dev).
       - name: Boot server + run smoke
         env:
           NODE_ENV: development

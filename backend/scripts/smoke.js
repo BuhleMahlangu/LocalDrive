@@ -1,41 +1,12 @@
 // End-to-end smoke test for the DriveLocal backend.
-// Starts nothing itself - assumes the server is already running on PORT, in dev
-// mode (so OTP codes are logged to the console rather than sent by SMS/email).
-const fs = require('fs');
-const path = require('path');
+// Starts nothing itself - assumes the server is already running on PORT.
 const PORT = process.env.PORT || 4000;
 const BASE = `http://localhost:${PORT}`;
 
-// Where the running server's stdout lives, so we can read the dev OTP it logs:
-//   - SMS_LOG_FILE env var (explicit)
-//   - backend-dev.log in the repo root (the documented dev workflow
-//     `npm run dev > backend-dev.log`)
-// The dev code is only logged when no SMS/SMTP provider is active, which is the
-// normal local setup.
-function otpLogCandidates() {
-  return [
-    process.env.SMS_LOG_FILE,
-    path.join(__dirname, '..', '..', 'backend-dev.log'),
-    path.join(__dirname, '..', '..', 'dev.out.log'),
-  ].filter(Boolean);
-}
-
-function latestLoggedOtp(phone) {
-  for (const file of otpLogCandidates()) {
-    let content;
-    try { content = fs.readFileSync(file, 'utf8'); } catch { continue; }
-    // Windows PowerShell's `>` redirect writes UTF-16LE; reading it as UTF-8
-    // leaves NUL bytes between characters. Strip them so the regex still works
-    // whether the dev captured the log with cmd or PowerShell.
-    content = content.replace(/\0/g, '');
-    // Lines look like: [sms] (dev mode — SMS not sent) To +27...: ...code is 482915...
-    const re = new RegExp(`To ${phone.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\D.*?(\\d{6})`, 'g');
-    let match;
-    let last = null;
-    while ((match = re.exec(content)) !== null) last = match[1];
-    if (last) return last;
-  }
-  return null;
+// A deterministic 6-digit PIN per phone so repeated smoke runs can sign in.
+function pinFor(phone) {
+  const digits = String(phone).replace(/\D/g, '');
+  return digits.slice(-6).padStart(6, '0');
 }
 
 async function api(method, path, body, token) {
@@ -70,17 +41,13 @@ async function uploadCustomerIdentity(token, idNumber) {
   return { status: res.status, json: await res.json().catch(() => ({})) };
 }
 
+// Sign in with phone + PIN. First call sets the PIN; later calls log in with the
+// same deterministic PIN.
 async function login(phone, role, name, email) {
-  const requested = await api('POST', '/api/auth/otp/request', { phone, role });
-  // In dev the server logs the random code to its stdout (see latestLoggedOtp).
-  // There is no fixed fallback: a real provider in dev must be avoided by not
-  // setting SMS_FORCE, and in prod the code genuinely arrives by SMS/email.
-  const code = requested.json && requested.json.dev ? latestLoggedOtp(phone) : null;
-  if (!code) {
-    throw new Error(`Could not read the dev OTP for ${phone}. Is the server running in dev mode with its output going to backend-dev.log?`);
-  }
-  const res = await api('POST', '/api/auth/otp/verify', { phone, code, role, name, email });
-  return res;
+  const pin = pinFor(phone);
+  const setup = await api('POST', '/api/auth/pin/setup', { phone, pin, role, name, email });
+  if (setup.status === 200) return setup;
+  return api('POST', '/api/auth/pin/login', { phone, pin, role });
 }
 
 async function main() {
@@ -97,7 +64,7 @@ async function main() {
 
   console.log('\n[1] Driver goes online');
   const driver = await login(driverPhone, 'driver', 'Thabo', 'd@x.za');
-  assert(driver.status === 200 && ['admin', 'driver'].includes(driver.json.user.role), 'driver OTP verify');
+  assert(driver.status === 200 && ['admin', 'driver'].includes(driver.json.user.role), 'driver PIN login');
   const driverToken = driver.json.token;
 
   const online = await api('POST', '/api/driver/online', { isOnline: true }, driverToken);
@@ -132,7 +99,7 @@ async function main() {
 
   console.log('\n[3] Customer books a trip');
   const customer = await login('+27730002222', 'customer', 'Naledi', 'n@x.za');
-  assert(customer.status === 200 && customer.json.user.role === 'customer', 'customer OTP verify');
+  assert(customer.status === 200 && customer.json.user.role === 'customer', 'customer PIN login');
   const custToken = customer.json.token;
 
   // Customers must upload ID documents before their first booking.
